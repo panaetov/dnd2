@@ -1,0 +1,178 @@
+version: '3.8'
+
+services:
+  # Prosody: XMPP сервер
+  prosody:
+    image: jitsi/prosody:prosody-13.0.2
+    expose:
+      - '5222'
+      - '5269'
+      - '5347'
+      - '5280'
+    volumes:
+      - ./prosody_config:/config
+    environment:
+      - JICOFO_AUTH_USER=focus
+      - JICOFO_AUTH_PASSWORD=1234567890
+      - JVB_AUTH_USER=jvb
+      - JVB_AUTH_PASSWORD=1234567890
+      - XMPP_DOMAIN=meet.jitsi
+      - XMPP_AUTH_DOMAIN=auth.meet.jitsi
+      - XMPP_MUC_DOMAIN=muc.meet.jitsi
+      - XMPP_INTERNAL_MUC_DOMAIN=internal-muc.meet.jitsi
+      - XMPP_INTERNAL_MUC_JID_ACCESS_WHITELIST=focus@auth.meet.jitsi
+      - XMPP_INTERNAL_MUC_ROOM_CREATION_ALLOWED=focus@auth.meet.jitsi
+      - JVB_TCP_HARVESTER_DISABLED=true
+      - JVB_TCP_PORT=4443
+      - GENERATE_CERTS=1
+      - ENABLE_STUN_TURN=1
+      - STUN_SERVERS=meet-jit-si-turnrelay.jitsi.net:443  # или свой TURN, если есть
+    networks:
+      - jitsi
+
+  # Jicofo: Jitsi Conference Focus
+  jicofo:
+    image: jitsi/jicofo:jicofo-1.0-1167-1
+    volumes:
+      - jicofo_config:/config
+    environment:
+      - XMPP_DOMAIN=meet.jitsi
+      - XMPP_SERVER=prosody
+      - XMPP_PORT=5222
+      - XMPP_AUTH_DOMAIN=auth.meet.jitsi
+      - XMPP_INTERNAL_MUC_DOMAIN=internal-muc.meet.jitsi
+      - JICOFO_AUTH_USER=focus
+      - JICOFO_AUTH_PASSWORD=1234567890
+      - JVB_BREWERY_MUC=jvbbrewery
+      - JVB_TCP_HARVESTER_DISABLED=true
+      - JICOFO_RESERVATION_ENABLED=false
+    depends_on:
+      - prosody
+    networks:
+      - jitsi
+
+  # JVB (Jitsi Videobridge)
+  jvb:
+    image: jitsi/jvb:jvb-2.3-260-gea11cd36c-1
+    ports:
+      - '10000:10000/udp'
+    volumes:
+      - jvb_config:/config
+    environment:
+      - XMPP_DOMAIN=meet.jitsi
+      - XMPP_SERVER=prosody
+      - XMPP_AUTH_DOMAIN=auth.meet.jitsi
+      - XMPP_INTERNAL_MUC_DOMAIN=internal-muc.meet.jitsi
+      - JVB_AUTH_USER=jvb
+      - JVB_AUTH_PASSWORD=1234567890
+      - JVB_BREWERY_MUC=jvbbrewery
+      - JVB_TCP_HARVESTER_DISABLED=true
+      - JVB_STUN_SERVERS=meet-jit-si-turnrelay.jitsi.net:443
+      - JVB_ENABLE_APIS=rest,colibri
+    depends_on:
+      - prosody
+    networks:
+      - jitsi
+
+  # Web (веб-интерфейс)
+  web:
+    image: jitsi/web:web-1.0.8924-1
+    ports:
+      - '8000:80'
+    volumes:
+      - web_config:/config
+      - ./jitsi-config/interface_config.js:/config/interface_config.js
+      - ./plugin/transcription-plugin.js:/usr/share/jitsi-meet/libs/transcription-plugin.js
+      - ./jitsi-web/index.html:/usr/share/jitsi-meet/index.html
+    environment:
+      - XMPP_SERVER=prosody
+      - XMPP_DOMAIN=meet.jitsi
+      - XMPP_PORT=5222
+      - XMPP_AUTH_DOMAIN=auth.meet.jitsi
+      - XMPP_INTERNAL_MUC_DOMAIN=internal-muc.meet.jitsi
+      - JVB_TCP_HARVESTER_DISABLED=true
+      - ENABLE_AUDIO_LEVELS=1
+      - ENABLE_NOISY_MIC_DETECTION=1
+      - ENABLE_IPV6=0
+      - PUBLIC_URL=dnd-yopta.ru
+      - XMPP_BOSH_URL_BASE=http://prosody:5280
+      - XMPP_WEBSOCKET_URL=ws://localhost:8000/xmpp-websocket
+    depends_on:
+      - prosody
+      - jicofo
+      - jvb
+    networks:
+      - jitsi
+
+  # WebSocket-сервер для транскрипции
+  riffusion:
+    build:
+      context: ./riffusion
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./riffusion:/riffusion
+      - ./ambient:/ambient
+    command: server
+    networks:
+      - jitsi
+
+  # WebSocket-сервер для транскрипции
+  websocket-server:
+    build:
+      context: ./server
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./server:/dude
+      - ./records:/tmp/records
+    command: server
+    networks:
+      - jitsi
+
+  backend:
+    build:
+      context: ./backend
+    ports:
+      - "8043:8000"
+    volumes:
+      - ./backend:/dude
+    command: bash
+    networks:
+      - jitsi
+
+  # Новый Nginx
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/certs:/etc/nginx/certs
+    depends_on:
+      - web
+    networks:
+      - jitsi
+  db:
+    image: postgres:16
+    restart: always
+    environment:
+      POSTGRES_DB: dnd
+      POSTGRES_USER: dude
+      POSTGRES_PASSWORD: dude_password_123
+    ports:
+      - "5437:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+
+volumes:
+  jicofo_config:
+  jvb_config:
+  web_config:
+  postgres_data:
+
+networks:
+  jitsi:
+    driver: bridge

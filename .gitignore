@@ -1,0 +1,3 @@
+riffusion
+backend/.mypy_cache
+server/model
