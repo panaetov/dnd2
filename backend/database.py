@@ -51,6 +51,17 @@ class Game(BaseModel):
     master_join_link: str
 
     @classmethod
+    async def find_by_external_id(cls, external_id):
+        async with _POOL.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT * FROM games where external_id = $1;
+                """,
+                external_id,
+            )
+            return cls(**dict(row)) if row else None
+
+    @classmethod
     async def find_by_id(cls, id):
         async with _POOL.acquire() as conn:
             row = await conn.fetchrow(
@@ -60,6 +71,7 @@ class Game(BaseModel):
                 id,
             )
             return cls(**dict(row)) if row else None
+
 
     @classmethod
     async def find_by_master_link(cls, master_join_link):
@@ -93,5 +105,47 @@ class Character(BaseModel):
                 SELECT * FROM characters where join_link = $1;
                 """,
                 join_link,
+            )
+            return cls(**dict(row)) if row else None
+
+    @classmethod
+    async def find_by_external_id(cls, external_id):
+        async with _POOL.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT * FROM characters where external_id = $1;
+                """,
+                external_id,
+            )
+            return cls(**dict(row)) if row else None
+
+
+class Map(BaseModel):
+    id: int = 0
+    external_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+
+    game_id: int
+    url: str
+
+    x_center: int
+    y_center: int
+    zoom: int
+
+    @classmethod
+    async def find_by_game_external_id(cls, game_external_id):
+        game = await Game.find_by_external_id(game_external_id)
+
+        assert game
+
+        return await cls.find_by_game_id(game.id)
+
+    @classmethod
+    async def find_by_game_id(cls, game_id):
+        async with _POOL.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT * FROM maps where game_id = $1;
+                """,
+                game_id,
             )
             return cls(**dict(row)) if row else None

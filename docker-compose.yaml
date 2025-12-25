@@ -9,6 +9,8 @@ services:
       - '5269'
       - '5347'
       - '5280'
+    ports:
+      - '5222:5222'
     volumes:
       - ./prosody_config:/config
     environment:
@@ -137,7 +139,7 @@ services:
       - "8043:8000"
     volumes:
       - ./backend:/dude
-    command: bash
+    command: webserver
     networks:
       - jitsi
 
@@ -165,6 +167,8 @@ services:
       - "5437:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - jitsi
 
 
 volumes:

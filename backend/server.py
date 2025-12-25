@@ -57,6 +57,14 @@ async def join_as_character_handler(link: str, response: Response):
     return response
 
 
-@app.get("/game/{game_external_id}")
-async def dummy_game_handler(game_external_id: str):
-    return f"DUMMY GAME: {game_external_id}"
+@app.get("/game/{game_external_id}/map")
+async def get_map_handler(game_external_id: str):
+    gmap = await database.Map.find_by_game_external_id(game_external_id)
+    return gmap.model_dump()
+
+
+@app.get("/game/{game_external_id}/character/{character_external_id}")
+async def get_character_handler(game_external_id: str, character_external_id: str):
+    cha = await database.Character.find_by_external_id(character_external_id)
+
+    return cha.model_dump()
