@@ -106,32 +106,6 @@ services:
     networks:
       - jitsi
 
-  # WebSocket-сервер для транскрипции
-  riffusion:
-    build:
-      context: ./riffusion
-    ports:
-      - "8081:8081"
-    volumes:
-      - ./riffusion:/riffusion
-      - ./ambient:/ambient
-    command: server
-    networks:
-      - jitsi
-
-  # WebSocket-сервер для транскрипции
-  websocket-server:
-    build:
-      context: ./server
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./server:/dude
-      - ./records:/tmp/records
-    command: server
-    networks:
-      - jitsi
-
   backend:
     build:
       context: ./backend

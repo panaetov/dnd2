@@ -76,54 +76,55 @@ async def get_character_handler(game_external_id: str, character_external_id: st
 ACTIVE_CONNECTIONS: Dict[str, List[WebSocket]] = {}
 
 
-@app.websocket("/ws/game/{game_external_id}/map/set")
+@app.websocket("/ws/game/{game_external_id}/set")
 async def set_map_stream_handler(game_external_id: str, websocket: WebSocket):
     await websocket.accept()
     while True:
         data = await websocket.receive_text()
-        logger.info(f"New map data {data} for game {game_external_id}.")
+        logger.info(f"WS data {data} for game {game_external_id}.")
         parsed_data = json.loads(data)
-        x_center = parsed_data["x_center"]
-        y_center = parsed_data["y_center"]
-        zoom = parsed_data["zoom"]
 
-        gmap = await database.Map.find_by_game_external_id(game_external_id)
+        topic = parsed_data["topic"]
+        payload = parsed_data["data"]
 
-        gmap.x_center = x_center
-        gmap.y_center = y_center
-        gmap.zoom = zoom
+        if topic == "map.update":
+            x_center = payload["x_center"]
+            y_center = payload["y_center"]
+            zoom = payload["zoom"]
 
-        await gmap.save()
+            gmap = await database.Map.find_by_game_external_id(game_external_id)
+
+            gmap.x_center = x_center
+            gmap.y_center = y_center
+            gmap.zoom = zoom
+
+            await gmap.save()
 
         player_websockets: List[WebSocket] = ACTIVE_CONNECTIONS.get(
             game_external_id, []
         )
         for player_ws in player_websockets:
             try:
-                await player_ws.send_text(
-                    json.dumps(
-                        {
-                            "data": gmap.model_dump(),
-                        }
-                    )
-                )
-            except WebSocketDisconnect:
+                await player_ws.send_text(data)
+            except Exception:
                 player_websockets.remove(player_ws)
 
 
-@app.websocket("/ws/game/{game_external_id}/map/get")
+@app.websocket("/ws/game/{game_external_id}/get")
 async def get_map_stream_handler(game_external_id: str, websocket: WebSocket):
     await websocket.accept()
 
     websockets = ACTIVE_CONNECTIONS.setdefault(game_external_id, [])
 
     logger.info(
-        f"New connection for map updates: game={game_external_id}, len(conns) = {len(websockets)}."
+        f"New connection for map updates: game={game_external_id}, "
+        f"len(conns) = {len(websockets)}."
     )
     gmap = await database.Map.find_by_game_external_id(game_external_id)
     await websocket.send_text(
         json.dumps(
             {
+                "topic": "map.update",
                 "data": gmap.model_dump(),
             }
         )
