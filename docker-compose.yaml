@@ -139,7 +139,7 @@ services:
       - "8043:8000"
     volumes:
       - ./backend:/dude
-    command: webserver
+    command: bash
     networks:
       - jitsi
 
@@ -159,12 +159,12 @@ services:
   db:
     image: postgres:16
     restart: always
+    expose:
+      - '5432'
     environment:
       POSTGRES_DB: dnd
       POSTGRES_USER: dude
       POSTGRES_PASSWORD: dude_password_123
-    ports:
-      - "5437:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:

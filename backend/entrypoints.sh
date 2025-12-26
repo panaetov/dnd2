@@ -8,7 +8,7 @@ case "$1" in
         ;;
     "bash")
         echo "Starting bash ..."
-        exec bash
+        exec tail -f /dev/null
         ;;
 
     "webserver")

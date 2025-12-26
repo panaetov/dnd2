@@ -72,7 +72,6 @@ class Game(BaseModel):
             )
             return cls(**dict(row)) if row else None
 
-
     @classmethod
     async def find_by_master_link(cls, master_join_link):
         async with _POOL.acquire() as conn:
@@ -122,14 +121,59 @@ class Character(BaseModel):
 
 class Map(BaseModel):
     id: int = 0
-    external_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
 
     game_id: int
     url: str
 
     x_center: int
     y_center: int
-    zoom: int
+    zoom: float
+
+    async def save(self):
+        async with _POOL.acquire() as conn:
+            if self.id:
+                await conn.execute(
+                    """
+                    update maps
+                    set
+                        game_id = $1,
+                        url = $2,
+                        x_center = $3,
+                        y_center = $4,
+                        zoom = $5
+                    where
+                        id = $6
+                    """,
+                    self.game_id,
+                    self.url,
+                    self.x_center,
+                    self.y_center,
+                    self.zoom,
+                    self.id,
+                )
+
+            else:
+                new_row = await conn.fetchrow(
+                    """
+                    INSERT INTO maps (
+                        game_id,
+                        url,
+                        x_center,
+                        y_center,
+                        zoom
+                    )
+                    VALUES ($1, $2, $3, $4, $5)
+                    RETURNING id
+                    """,
+                    self.game_id,
+                    self.url,
+                    self.x_center,
+                    self.y_center,
+                    self.zoom,
+                )
+                self.id = new_row["id"]
+
+        return self
 
     @classmethod
     async def find_by_game_external_id(cls, game_external_id):

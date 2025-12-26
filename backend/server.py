@@ -1,7 +1,9 @@
+import json
 import logging
 from contextlib import asynccontextmanager
+from typing import Dict, List
 
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import RedirectResponse
 
 import database
@@ -65,6 +67,78 @@ async def get_map_handler(game_external_id: str):
 
 @app.get("/game/{game_external_id}/character/{character_external_id}")
 async def get_character_handler(game_external_id: str, character_external_id: str):
+    logger.info(f"Game = {game_external_id}")
     cha = await database.Character.find_by_external_id(character_external_id)
 
     return cha.model_dump()
+
+
+ACTIVE_CONNECTIONS: Dict[str, List[WebSocket]] = {}
+
+
+@app.websocket("/ws")
+async def stream_handler(websocket: WebSocket):
+    await websocket.accept()
+
+
+@app.websocket("/game/{game_external_id}/map/ws/set")
+async def set_map_stream_handler(game_external_id: str, websocket: WebSocket):
+    await websocket.accept()
+    while True:
+        data = await websocket.receive_text()
+        logger.info(f"New map data {data} for game {game_external_id}.")
+        parsed_data = json.loads(data)
+        x_center = parsed_data["x_center"]
+        y_center = parsed_data["y_center"]
+        zoom = parsed_data["zoom"]
+
+        gmap = await database.Map.find_by_game_external_id(game_external_id)
+
+        gmap.x_center = x_center
+        gmap.y_center = y_center
+        gmap.zoom = zoom
+
+        await gmap.save()
+
+        player_websockets: List[WebSocket] = ACTIVE_CONNECTIONS.get(
+            game_external_id, []
+        )
+        for player_ws in player_websockets:
+            try:
+                await player_ws.send_text(
+                    json.dumps(
+                        {
+                            "data": gmap.model_dump(),
+                        }
+                    )
+                )
+            except WebSocketDisconnect:
+                player_websockets.remove(player_ws)
+
+
+@app.websocket("/game/{game_external_id}/map/ws/get")
+async def get_map_stream_handler(game_external_id: str, websocket: WebSocket):
+    await websocket.accept()
+
+    websockets = ACTIVE_CONNECTIONS.setdefault(game_external_id, [])
+
+    logger.info(
+        f"New connection for map updates: game={game_external_id}, len(conns) = {len(websockets)}."
+    )
+    gmap = await database.Map.find_by_game_external_id(game_external_id)
+    await websocket.send_text(
+        json.dumps(
+            {
+                "data": gmap.model_dump(),
+            }
+        )
+    )
+
+    websockets.append(websocket)
+    while True:
+        try:
+            await websocket.receive_text()
+        except Exception:
+            logger.info(f"Connect from game {game_external_id} is closed")
+            websockets.remove(websocket)
+            break

@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS maps (
     url TEXT NOT NULL,
     x_center integer DEFAULT 50,
     y_center integer DEFAULT 50,
-    zoom integer DEFAULT 1
+    zoom float DEFAULT 1
 );
 
 
