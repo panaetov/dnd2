@@ -139,7 +139,7 @@ services:
       - "8043:8000"
     volumes:
       - ./backend:/dude
-    command: bash
+    command: webserver
     networks:
       - jitsi
 

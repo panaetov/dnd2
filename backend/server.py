@@ -76,12 +76,7 @@ async def get_character_handler(game_external_id: str, character_external_id: st
 ACTIVE_CONNECTIONS: Dict[str, List[WebSocket]] = {}
 
 
-@app.websocket("/ws")
-async def stream_handler(websocket: WebSocket):
-    await websocket.accept()
-
-
-@app.websocket("/game/{game_external_id}/map/ws/set")
+@app.websocket("/ws/game/{game_external_id}/map/set")
 async def set_map_stream_handler(game_external_id: str, websocket: WebSocket):
     await websocket.accept()
     while True:
@@ -116,7 +111,7 @@ async def set_map_stream_handler(game_external_id: str, websocket: WebSocket):
                 player_websockets.remove(player_ws)
 
 
-@app.websocket("/game/{game_external_id}/map/ws/get")
+@app.websocket("/ws/game/{game_external_id}/map/get")
 async def get_map_stream_handler(game_external_id: str, websocket: WebSocket):
     await websocket.accept()
 
