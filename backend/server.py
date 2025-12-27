@@ -27,7 +27,12 @@ async def lifespan(*_, **__):
     logger.info("Database is closed")
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(
+    lifespan=lifespan,
+    docs_url='/api/docs',
+    redoc_url='/api/redoc',
+    openapi_url='/api/openapi.json',
+)
 
 
 app.add_middleware(
@@ -45,7 +50,7 @@ class JoinResponse(pydantic.BaseModel):
     master_id: str = ""
 
 
-@app.get("/join-as-master/{link}")
+@app.get("/api/join-as-master/{link}")
 async def join_as_master_handler(link: str) -> JoinResponse:
     game = await database.Game.find_by_master_link(link)
     assert game
@@ -59,7 +64,7 @@ async def join_as_master_handler(link: str) -> JoinResponse:
     )
 
 
-@app.get("/join/{link}")
+@app.get("/api/join/{link}")
 async def join_as_character_handler(link: str) -> JoinResponse:
     cha = await database.Character.find_by_join_link(link)
     assert cha
@@ -73,13 +78,13 @@ async def join_as_character_handler(link: str) -> JoinResponse:
     )
 
 
-@app.get("/game/{game_external_id}/map")
+@app.get("/api/game/{game_external_id}/map")
 async def get_map_handler(game_external_id: str) -> database.Map:
     gmap = await database.Map.find_by_game_external_id(game_external_id)
     return gmap
 
 
-@app.get("/game/{game_external_id}/character/{character_external_id}")
+@app.get("/api/game/{game_external_id}/character/{character_external_id}")
 async def get_character_handler(
     game_external_id: str, character_external_id: str
 ) -> database.Character:
