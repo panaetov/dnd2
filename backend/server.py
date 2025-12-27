@@ -50,31 +50,30 @@ class JoinResponse(pydantic.BaseModel):
     master_id: str = ""
 
 
-@app.get("/api/join-as-master/{link}")
-async def join_as_master_handler(link: str) -> JoinResponse:
-    game = await database.Game.find_by_master_link(link)
-    assert game
-
-    master = await database.Master.find_by_id(game.master_id)
-    assert master
-
-    return JoinResponse(
-        game_id=game.external_id,
-        master_id=master.external_id,
-    )
-
-
 @app.get("/api/join/{link}")
 async def join_as_character_handler(link: str) -> JoinResponse:
-    cha = await database.Character.find_by_join_link(link)
-    assert cha
+    game = None
+    master = None
+    cha = None
 
-    game = await database.Game.find_by_id(cha.game_id)
-    assert game
+    if link.startswith("m-"):
+        game = await database.Game.find_by_master_link(link)
+        assert game
+
+        master = await database.Master.find_by_id(game.master_id)
+        assert master
+
+    else:
+        cha = await database.Character.find_by_join_link(link)
+        assert cha
+
+        game = await database.Game.find_by_id(cha.game_id)
+        assert game
 
     return JoinResponse(
         game_id=game.external_id,
-        user_id=cha.external_id,
+        user_id=cha.external_id if cha else "",
+        master_id=master.external_id if master else "",
     )
 
 
