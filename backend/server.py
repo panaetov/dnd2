@@ -29,9 +29,9 @@ async def lifespan(*_, **__):
 
 app = FastAPI(
     lifespan=lifespan,
-    docs_url='/api/docs',
-    redoc_url='/api/redoc',
-    openapi_url='/api/openapi.json',
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json",
 )
 
 
@@ -46,22 +46,27 @@ app.add_middleware(
 
 class JoinResponse(pydantic.BaseModel):
     game_id: str
-    user_id: str = ""
-    master_id: str = ""
+    user_id: str
+    is_master: bool
 
 
 @app.get("/api/join/{link}")
-async def join_as_character_handler(link: str) -> JoinResponse:
+async def join_handler(link: str) -> JoinResponse:
     game = None
     master = None
     cha = None
 
+    is_master = False
+    user_id = ""
     if link.startswith("m-"):
         game = await database.Game.find_by_master_link(link)
         assert game
 
         master = await database.Master.find_by_id(game.master_id)
         assert master
+
+        user_id = "master"
+        is_master = True
 
     else:
         cha = await database.Character.find_by_join_link(link)
@@ -70,10 +75,13 @@ async def join_as_character_handler(link: str) -> JoinResponse:
         game = await database.Game.find_by_id(cha.game_id)
         assert game
 
+        user_id = cha.external_id
+        is_master = False
+
     return JoinResponse(
         game_id=game.external_id,
-        user_id=cha.external_id if cha else "",
-        master_id=master.external_id if master else "",
+        user_id=user_id,
+        is_master=is_master,
     )
 
 
@@ -83,51 +91,72 @@ async def get_map_handler(game_external_id: str) -> database.Map:
     return gmap
 
 
+class CharacterFacade(pydantic.BaseModel):
+    external_id: str
+    avatar_url: str
+
+
 @app.get("/api/game/{game_external_id}/character/{character_external_id}")
 async def get_character_handler(
     game_external_id: str, character_external_id: str
-) -> database.Character:
+) -> CharacterFacade:
     logger.info(f"Game = {game_external_id}")
-    cha = await database.Character.find_by_external_id(character_external_id)
+    game = await database.Game.find_by_external_id(game_external_id)
+    if character_external_id == "master":
+        return CharacterFacade(
+            external_id="master",
+            avatar_url=game.master_avatar_url,
+        )
 
-    return cha
+    cha = await database.Character.find_by_external_id(character_external_id)
+    return CharacterFacade(
+        external_id=cha.external_id,
+        avatar_url=cha.avatar_url,
+    )
 
 
 ACTIVE_CONNECTIONS: Dict[str, List[WebSocket]] = {}
 
 
-@app.websocket("/ws/game/{game_external_id}/set")
-async def set_map_stream_handler(game_external_id: str, websocket: WebSocket):
-    await websocket.accept()
-    while True:
-        data = await websocket.receive_text()
-        logger.info(f"WS data {data} for game {game_external_id}.")
-        parsed_data = json.loads(data)
+class MapUpdateRequest(pydantic.BaseModel):
+    x_center: int | None = None
+    y_center: int | None = None
+    zoom: float | None = None
 
-        topic = parsed_data["topic"]
-        payload = parsed_data["data"]
 
-        if topic == "map.update":
-            x_center = payload["x_center"]
-            y_center = payload["y_center"]
-            zoom = payload["zoom"]
+@app.post("/api/game/{game_external_id}/map")
+async def update_map_handler(game_external_id: str, payload: MapUpdateRequest):
+    x_center = payload.x_center
+    y_center = payload.y_center
+    zoom = payload.zoom
 
-            gmap = await database.Map.find_by_game_external_id(game_external_id)
+    gmap = await database.Map.find_by_game_external_id(game_external_id)
 
-            gmap.x_center = x_center
-            gmap.y_center = y_center
-            gmap.zoom = zoom
+    if x_center is not None:
+        gmap.x_center = x_center
 
-            await gmap.save()
+    if y_center is not None:
+        gmap.y_center = y_center
 
-        player_websockets: List[WebSocket] = ACTIVE_CONNECTIONS.get(
-            game_external_id, []
-        )
-        for player_ws in player_websockets:
-            try:
-                await player_ws.send_text(data)
-            except Exception:
-                player_websockets.remove(player_ws)
+    if zoom is not None:
+        gmap.zoom = zoom
+
+    await gmap.save()
+
+    player_websockets: List[WebSocket] = ACTIVE_CONNECTIONS.get(game_external_id, [])
+    for player_ws in player_websockets:
+        try:
+            await player_ws.send_text(
+                json.dumps(
+                    {
+                        "topic": "map.update",
+                        "data": gmap.model_dump(),
+                    }
+                )
+            )
+
+        except Exception:
+            player_websockets.remove(player_ws)
 
 
 @app.websocket("/ws/game/{game_external_id}/get")

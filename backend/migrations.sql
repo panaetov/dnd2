@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS games (
     external_id TEXT UNIQUE NOT NULL,
 
     master_id integer NOT NULL REFERENCES masters(id),
-    master_join_link TEXT NOT NULL
+    master_join_link TEXT NOT NULL,
+    master_avatar_url TEXT NOT NULL
 );
 
 
