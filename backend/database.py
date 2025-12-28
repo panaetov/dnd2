@@ -49,6 +49,7 @@ class Game(BaseModel):
 
     master_id: int
     master_join_link: str
+    master_avatar_url: str
 
     @classmethod
     async def find_by_external_id(cls, external_id):
