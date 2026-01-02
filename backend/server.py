@@ -94,6 +94,35 @@ async def get_map_handler(game_external_id: str) -> database.Map:
 class CharacterFacade(pydantic.BaseModel):
     external_id: str
     avatar_url: str
+    is_master: bool
+
+
+@app.get("/api/game/{game_external_id}/characters")
+async def get_characters_handler(game_external_id: str) -> List[CharacterFacade]:
+    logger.info(f"Game = {game_external_id}")
+    game = await database.Game.find_by_external_id(game_external_id)
+
+    characters = await database.Character.find_by_game_id(
+        game.id,
+    )
+    results = []
+    for cha in characters:
+        results.append(
+            CharacterFacade(
+                external_id=cha.external_id,
+                avatar_url=cha.avatar_url,
+                is_master=False,
+            )
+        )
+
+    results.append(
+        CharacterFacade(
+            external_id="master",
+            avatar_url=game.master_avatar_url,
+            is_master=True,
+        )
+    )
+    return results
 
 
 @app.get("/api/game/{game_external_id}/character/{character_external_id}")
@@ -125,7 +154,9 @@ class MapUpdateRequest(pydantic.BaseModel):
 
 
 @app.post("/api/game/{game_external_id}/map")
-async def update_map_handler(game_external_id: str, payload: MapUpdateRequest) -> database.Map:
+async def update_map_handler(
+    game_external_id: str, payload: MapUpdateRequest
+) -> database.Map:
     x_center = payload.x_center
     y_center = payload.y_center
     zoom = payload.zoom

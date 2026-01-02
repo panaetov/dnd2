@@ -119,6 +119,17 @@ class Character(BaseModel):
             )
             return cls(**dict(row)) if row else None
 
+    @classmethod
+    async def find_by_game_id(cls, game_id):
+        async with _POOL.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT * FROM characters where game_id = $1;
+                """,
+                game_id,
+            )
+            return [cls(**dict(row)) for row in rows]
+
 
 class Map(BaseModel):
     id: int = 0
