@@ -125,7 +125,7 @@ class MapUpdateRequest(pydantic.BaseModel):
 
 
 @app.post("/api/game/{game_external_id}/map")
-async def update_map_handler(game_external_id: str, payload: MapUpdateRequest):
+async def update_map_handler(game_external_id: str, payload: MapUpdateRequest) -> database.Map:
     x_center = payload.x_center
     y_center = payload.y_center
     zoom = payload.zoom
@@ -157,6 +157,8 @@ async def update_map_handler(game_external_id: str, payload: MapUpdateRequest):
 
         except Exception:
             player_websockets.remove(player_ws)
+
+    return gmap
 
 
 @app.websocket("/ws/game/{game_external_id}/get")
