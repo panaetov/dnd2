@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS characters (
 
     name TEXT NOT NULL,
 
+    color TEXT NOT NULL DEFAULT '#0000ff',
+
     game_id integer NOT NULL REFERENCES games(id),
     join_link TEXT NOT NULL,
 

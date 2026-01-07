@@ -97,6 +97,8 @@ class Character(BaseModel):
     avatar_url: str
     race: str
 
+    inventory: List = []
+
     @classmethod
     async def find_by_join_link(cls, join_link):
         async with _POOL.acquire() as conn:

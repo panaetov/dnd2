@@ -91,11 +91,21 @@ async def get_map_handler(game_external_id: str) -> database.Map:
     return gmap
 
 
+class InventoryItem(pydantic.BaseModel):
+    id: str
+    name: str
+    image_url: str
+    description: str
+    quantity: int
+
+
 class CharacterFacade(pydantic.BaseModel):
     external_id: str
     avatar_url: str
     is_master: bool
     name: str
+    color: str = "#ffffff"
+    inventory: List[InventoryItem] = []
 
 
 @app.get("/api/game/{game_external_id}/characters")
@@ -114,6 +124,8 @@ async def get_characters_handler(game_external_id: str) -> List[CharacterFacade]
                 avatar_url=cha.avatar_url,
                 is_master=False,
                 name=cha.name,
+                color=cha.color,
+                inventory=cha.inventory,
             )
         )
 
@@ -139,6 +151,7 @@ async def get_character_handler(
             external_id="master",
             avatar_url=game.master_avatar_url,
             is_master=True,
+            name="Мастер игры",
         )
 
     cha = await database.Character.find_by_external_id(character_external_id)
@@ -146,6 +159,9 @@ async def get_character_handler(
         external_id=cha.external_id,
         avatar_url=cha.avatar_url,
         is_master=False,
+        name=cha.name,
+        color=cha.color,
+        inventory=cha.inventory,
     )
 
 
