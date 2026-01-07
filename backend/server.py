@@ -95,6 +95,7 @@ class CharacterFacade(pydantic.BaseModel):
     external_id: str
     avatar_url: str
     is_master: bool
+    name: str
 
 
 @app.get("/api/game/{game_external_id}/characters")
@@ -112,6 +113,7 @@ async def get_characters_handler(game_external_id: str) -> List[CharacterFacade]
                 external_id=cha.external_id,
                 avatar_url=cha.avatar_url,
                 is_master=False,
+                name=cha.name,
             )
         )
 
@@ -120,6 +122,7 @@ async def get_characters_handler(game_external_id: str) -> List[CharacterFacade]
             external_id="master",
             avatar_url=game.master_avatar_url,
             is_master=True,
+            name="Мастер игры",
         )
     )
     return results
