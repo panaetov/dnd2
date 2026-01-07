@@ -138,12 +138,14 @@ async def get_character_handler(
         return CharacterFacade(
             external_id="master",
             avatar_url=game.master_avatar_url,
+            is_master=True,
         )
 
     cha = await database.Character.find_by_external_id(character_external_id)
     return CharacterFacade(
         external_id=cha.external_id,
         avatar_url=cha.avatar_url,
+        is_master=False,
     )
 
 
