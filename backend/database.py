@@ -98,6 +98,7 @@ class Character(BaseModel):
     race: str
 
     inventory: List = []
+    color: str
 
     @classmethod
     async def find_by_join_link(cls, join_link):
