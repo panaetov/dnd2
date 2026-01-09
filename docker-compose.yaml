@@ -106,6 +106,25 @@ services:
     networks:
       - jitsi
 
+  janus:
+    build:
+      context: ./janus
+    restart: unless-stopped
+    ports:
+      # HTTP API
+      - "8088:8088"
+      # HTTPS API
+      - "8089:8089"
+      # Admin/Monitor
+      - "7088:7088"
+      - "7089:7089"
+      # WebSockets
+      - "8188:8188"
+      # RTP/RTCP ports для медиа
+      - "10000-10200:10000-10200/udp"
+    volumes:
+      - ./janus/janus.transport.http.jcfg:/opt/janus/etc/janus/janus.transport.http.jcfg
+
   backend:
     build:
       context: ./backend
