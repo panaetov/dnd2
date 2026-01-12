@@ -37,7 +37,11 @@ CREATE TABLE IF NOT EXISTS characters (
     join_link TEXT NOT NULL,
 
     avatar_url TEXT NOT NULL,
-    race TEXT NOT NULL
+    race TEXT NOT NULL,
+
+    x int NULL,
+    y int NULL,
+    map_id integer NULL REFERENCES maps(id)
 );
 
 
@@ -54,6 +58,24 @@ CREATE TABLE IF NOT EXISTS maps (
 );
 
 
+CREATE TABLE IF NOT EXISTS items (
+    id serial PRIMARY KEY,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+
+    external_id TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+
+    game_id int NOT NULL REFERENCES games(id),
+
+    map_id int NULL REFERENCES games(id),
+    x int NULL,
+    y int NULL,
+
+    icon_url TEXT NOT NULL
+);
+
+
 insert into masters (external_id) values ('alexey');
 
 insert into games (external_id, name, master_id, master_join_link) values ('123', 'Game #1', 1, 'qwe');
@@ -62,3 +84,8 @@ insert into characters (external_id, name, game_id, join_link, avatar_url, race)
 ('player-1', 'Arnold', 1, 'rty', 'https://storage.yandexcloud.net/dnd2/player1.jpg', 'elf');
 
 insert into maps (game_id, url) values (1, 'https://storage.yandexcloud.net/dnd2/map.png');
+
+insert into items (game_id, external_id, name, icon_url) values (1, '1', 'Меч', 'https://images.vexels.com/media/users/3/273074/isolated/preview/496885a8007d7ce0df514a51798953a1-role-play-games-sword-icon.png');
+
+
+insert into items (game_id, external_id, name, icon_url) values (1, '2', 'Копьё', 'https://t3.ftcdn.net/jpg/07/10/08/60/360_F_710086003_NfIuJb5QwLI6T60BxtI3xWj1TIYGCsiD.jpg');
