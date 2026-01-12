@@ -100,6 +100,32 @@ class Character(BaseModel):
     inventory: List = []
     color: str
 
+    x: int | None = None
+    y: int | None = None
+    map_id: int | None = None
+
+    async def save(self):
+        async with _POOL.acquire() as conn:
+            if self.id:
+                await conn.execute(
+                    """
+                    update characters
+                    set
+                        x = $1,
+                        y = $2
+                    where
+                        id = $3
+                    """,
+                    self.x,
+                    self.y,
+                    self.id,
+                )
+
+            else:
+                raise NotImplementedError
+
+        return self
+
     @classmethod
     async def find_by_join_link(cls, join_link):
         async with _POOL.acquire() as conn:
@@ -208,3 +234,79 @@ class Map(BaseModel):
                 game_id,
             )
             return cls(**dict(row)) if row else None
+
+
+class Item(BaseModel):
+    id: int = 0
+
+    name: str
+    game_id: int
+    external_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+
+    map_id: int | None = None
+    x: int | None = None
+    y: int | None = None
+
+    icon_url: str
+
+    async def save(self):
+        async with _POOL.acquire() as conn:
+            if self.id:
+                await conn.execute(
+                    """
+                    update items
+                    set
+                        name = $1,
+                        game_id = $2,
+                        external_id = $3,
+                        x = $4,
+                        y = $5,
+                        icon_url = $6,
+                        map_id = $8
+                    where
+                        id = $7
+                    """,
+                    self.name,
+                    self.game_id,
+                    self.external_id,
+                    self.x,
+                    self.y,
+                    self.icon_url,
+                    self.id,
+                    self.map_id,
+                )
+
+            else:
+                raise NotImplementedError
+
+        return self
+
+    @classmethod
+    async def find_by_external_id(cls, external_id):
+        async with _POOL.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT * FROM items where external_id = $1;
+                """,
+                external_id,
+            )
+            return cls(**dict(row)) if row else None
+
+    @classmethod
+    async def find_by_game_external_id(cls, game_external_id):
+        game = await Game.find_by_external_id(game_external_id)
+
+        assert game
+
+        return await cls.find_by_game_id(game.id)
+
+    @classmethod
+    async def find_by_game_id(cls, game_id):
+        async with _POOL.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT * FROM items where game_id = $1;
+                """,
+                game_id,
+            )
+            return [cls(**dict(row)) for row in rows]

@@ -91,6 +91,82 @@ async def get_map_handler(game_external_id: str) -> database.Map:
     return gmap
 
 
+class ItemFacade(pydantic.BaseModel):
+    external_id: str
+
+    name: str
+
+    x: int | None = None
+    y: int | None = None
+
+
+@app.get("/api/game/{game_external_id}/items")
+async def get_items_handler(game_external_id: str) -> List[ItemFacade]:
+    logger.info(f"Game = {game_external_id}")
+    game = await database.Game.find_by_external_id(game_external_id)
+
+    items = await database.Item.find_by_game_id(
+        game.id,
+    )
+    results = []
+    for item in items:
+        results.append(
+            ItemFacade(
+                external_id=item.external_id,
+                name=item.name,
+                x=item.x,
+                y=item.y,
+            )
+        )
+
+    return results
+
+
+class ItemChangedRequest(pydantic.BaseModel):
+    x: int | None = None
+    y: int | None = None
+
+
+@app.post("/api/game/{game_external_id}/item/{item_external_id}")
+async def item_changed_handler(
+    game_external_id: str, item_external_id: str, payload: ItemChangedRequest
+) -> ItemFacade:
+    item = await database.Item.find_by_external_id(item_external_id)
+    assert item
+
+    item.x = payload.x
+    item.y = payload.y
+
+    await item.save()
+
+    player_websockets: List[WebSocket] = ACTIVE_CONNECTIONS.get(game_external_id, [])
+    for player_ws in player_websockets:
+        try:
+            await player_ws.send_text(
+                json.dumps(
+                    {
+                        "topic": "item.update",
+                        "data": {
+                            "external_id": item.external_id,
+                            "x": item.x,
+                            "y": item.y,
+                        },
+                    }
+                )
+            )
+
+        except Exception:
+            logger.exception("Connection is lost")
+            player_websockets.remove(player_ws)
+
+    return ItemFacade(
+        external_id=item.external_id,
+        name=item.name,
+        x=item.x,
+        y=item.y,
+    )
+
+
 class InventoryItem(pydantic.BaseModel):
     id: str
     name: str
@@ -106,6 +182,47 @@ class CharacterFacade(pydantic.BaseModel):
     name: str
     color: str = "#ffffff"
     inventory: List[InventoryItem] = []
+
+
+class CharacterUpdateRequest(pydantic.BaseModel):
+    x: int | None = None
+    y: int | None = None
+
+
+@app.post("/api/game/{game_external_id}/character/{character_external_id}")
+async def update_map_handler(
+    game_external_id: str, character_external_id, payload: CharacterUpdateRequest
+):
+    x = payload.x
+    y = payload.y
+
+    cha = await database.Character.find_by_external_id(character_external_id)
+    cha.x = x
+    cha.y = y
+
+    await cha.save()
+
+    player_websockets: List[WebSocket] = ACTIVE_CONNECTIONS.get(game_external_id, [])
+    for player_ws in player_websockets:
+        try:
+            await player_ws.send_text(
+                json.dumps(
+                    {
+                        "topic": "character.update",
+                        "data": {
+                            "external_id": cha.external_id,
+                            "x": x,
+                            "y": y,
+                        },
+                    }
+                )
+            )
+
+        except Exception:
+            logger.exception("Connection is lost")
+            player_websockets.remove(player_ws)
+
+    return {}
 
 
 @app.get("/api/game/{game_external_id}/characters")
@@ -168,6 +285,89 @@ async def get_character_handler(
 ACTIVE_CONNECTIONS: Dict[str, List[WebSocket]] = {}
 
 
+class DiceStartedRequest(pydantic.BaseModel):
+    dice_id: str
+
+
+@app.post("/api/game/{game_external_id}/dice/started")
+async def dice_started_handler(game_external_id: str, payload: DiceStartedRequest):
+    player_websockets: List[WebSocket] = ACTIVE_CONNECTIONS.get(game_external_id, [])
+    for player_ws in player_websockets:
+        try:
+            await player_ws.send_text(
+                json.dumps(
+                    {
+                        "topic": "dice.start",
+                        "data": {
+                            "dice_id": payload.dice_id,
+                        },
+                    }
+                )
+            )
+
+        except Exception:
+            logger.exception("Connection is lost")
+            player_websockets.remove(player_ws)
+
+    return {}
+
+
+class DiceChangedRequest(pydantic.BaseModel):
+    new_dice_id: str
+
+
+@app.post("/api/game/{game_external_id}/dice/changed")
+async def dice_changed_handler(game_external_id: str, payload: DiceChangedRequest):
+    player_websockets: List[WebSocket] = ACTIVE_CONNECTIONS.get(game_external_id, [])
+    for player_ws in player_websockets:
+        try:
+            await player_ws.send_text(
+                json.dumps(
+                    {
+                        "topic": "dice.change",
+                        "data": {
+                            "new_dice_id": payload.new_dice_id,
+                        },
+                    }
+                )
+            )
+
+        except Exception:
+            logger.exception("Connection is lost")
+            player_websockets.remove(player_ws)
+
+    return {}
+
+
+class DiceResultedRequest(pydantic.BaseModel):
+    dice_id: str
+    result: int
+
+
+@app.post("/api/game/{game_external_id}/dice/resulted")
+async def dice_resulted_handler(game_external_id: str, payload: DiceResultedRequest):
+    player_websockets: List[WebSocket] = ACTIVE_CONNECTIONS.get(game_external_id, [])
+    for player_ws in player_websockets:
+        try:
+            await player_ws.send_text(
+                json.dumps(
+                    {
+                        "topic": "dice.result",
+                        "data": {
+                            "dice_id": payload.dice_id,
+                            "result": payload.result,
+                        },
+                    }
+                )
+            )
+
+        except Exception:
+            logger.exception("Connection is lost")
+            player_websockets.remove(player_ws)
+
+    return {}
+
+
 class MapUpdateRequest(pydantic.BaseModel):
     x_center: int | None = None
     y_center: int | None = None
@@ -208,6 +408,7 @@ async def update_map_handler(
             )
 
         except Exception:
+            logger.exception("Connection is lost")
             player_websockets.remove(player_ws)
 
     return gmap
