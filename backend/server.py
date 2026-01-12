@@ -182,6 +182,8 @@ class CharacterFacade(pydantic.BaseModel):
     name: str
     color: str = "#ffffff"
     inventory: List[InventoryItem] = []
+    x: int | None = None
+    y: int | None = None
 
 
 class CharacterUpdateRequest(pydantic.BaseModel):
@@ -243,6 +245,8 @@ async def get_characters_handler(game_external_id: str) -> List[CharacterFacade]
                 name=cha.name,
                 color=cha.color,
                 inventory=cha.inventory,
+                x=cha.x,
+                y=cha.y,
             )
         )
 
@@ -279,6 +283,8 @@ async def get_character_handler(
         name=cha.name,
         color=cha.color,
         inventory=cha.inventory,
+        x=cha.x,
+        y=cha.y,
     )
 
 
