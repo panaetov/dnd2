@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS maps (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
 
+    external_id TEXT UNIQUE NOT NULL,
+
     game_id int UNIQUE NOT NULL REFERENCES games(id),
     url TEXT NOT NULL,
     x_center integer DEFAULT 50,
@@ -73,6 +75,18 @@ CREATE TABLE IF NOT EXISTS items (
     y int NULL,
 
     icon_url TEXT NOT NULL
+);
+
+
+CREATE TABLE IF NOT EXISTS fog_erace_points (
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+
+    map_id int NULL REFERENCES games(id),
+    x int NOT NULL,
+    y int NOT NULL,
+
+    radius int not NULL,
+    CONSTRAINT fog_unique_x_y UNIQUE (x, y, map_id, radius)
 );
 
 

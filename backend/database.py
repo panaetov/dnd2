@@ -85,6 +85,68 @@ class Game(BaseModel):
             return cls(**dict(row)) if row else None
 
 
+class FogEracePoint(BaseModel):
+    created_at: datetime.datetime | None = None
+    x: int
+    y: int
+    map_id: int
+    radius: int
+
+    @classmethod
+    async def add(cls, x, y, map_id, radius):
+        async with _POOL.acquire() as conn:
+            await conn.execute(
+                """
+                insert into fog_erace_points (
+                    x, y, map_id, radius
+                )
+                values (
+                    $1, $2, $3, $4
+                )
+                ON CONFLICT DO NOTHING;
+                """,
+                x,
+                y,
+                map_id,
+                radius,
+            )
+
+    @classmethod
+    async def find_by_map_external_id(cls, map_external_id):
+        gmap = await Map.find_by_external_id(map_external_id)
+
+        assert gmap
+
+        return await cls.find_by_map_id(gmap.id)
+
+    @classmethod
+    async def find_by_map_id(cls, map_id):
+        async with _POOL.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT * FROM fog_erace_points where map_id = $1
+                order by created_at
+                """,
+                map_id,
+            )
+            return [cls(**dict(row)) for row in rows]
+
+    @classmethod
+    async def find_by_params(cls, x, y, map_id, radius):
+        async with _POOL.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT * FROM fog_erace_points 
+                WHERE x = $1 AND y = $2 AND map_id = $3 AND radius = $4
+                """,
+                x,
+                y,
+                map_id,
+                radius,
+            )
+            return cls(**dict(row)) if row else None
+
+
 class Character(BaseModel):
     id: int = 0
     external_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
@@ -163,6 +225,8 @@ class Character(BaseModel):
 class Map(BaseModel):
     id: int = 0
 
+    external_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+
     game_id: int
     url: str
 
@@ -177,14 +241,16 @@ class Map(BaseModel):
                     """
                     update maps
                     set
-                        game_id = $1,
-                        url = $2,
-                        x_center = $3,
-                        y_center = $4,
-                        zoom = $5
+                        external_id = $1,
+                        game_id = $2,
+                        url = $3,
+                        x_center = $4,
+                        y_center = $5,
+                        zoom = $6
                     where
-                        id = $6
+                        id = $7
                     """,
+                    self.external_id,
                     self.game_id,
                     self.url,
                     self.x_center,
@@ -197,15 +263,17 @@ class Map(BaseModel):
                 new_row = await conn.fetchrow(
                     """
                     INSERT INTO maps (
+                        external_id,
                         game_id,
                         url,
                         x_center,
                         y_center,
                         zoom
                     )
-                    VALUES ($1, $2, $3, $4, $5)
+                    VALUES ($1, $2, $3, $4, $5, $6)
                     RETURNING id
                     """,
+                    self.external_id,
                     self.game_id,
                     self.url,
                     self.x_center,

@@ -420,6 +420,101 @@ async def update_map_handler(
     return gmap
 
 
+class FogEracePointFacade(pydantic.BaseModel):
+    x: int
+    y: int
+    map_external_id: str
+    radius: int
+    created_at: str | None = None
+
+
+class FogEracePointCreateRequest(pydantic.BaseModel):
+    x: int
+    y: int
+    radius: int
+
+
+@app.post("/api/game/{game_external_id}/fog-erace-point")
+async def create_fog_erace_point_handler(
+    game_external_id: str, payload: FogEracePointCreateRequest
+) -> FogEracePointFacade:
+    gmap = await database.Map.find_by_game_external_id(game_external_id)
+    assert gmap
+
+    await database.FogEracePoint.add(
+        payload.x, payload.y, gmap.id, payload.radius
+    )
+
+    fog_point = await database.FogEracePoint.find_by_params(
+        payload.x, payload.y, gmap.id, payload.radius
+    )
+    assert fog_point
+
+    player_websockets: List[WebSocket] = ACTIVE_CONNECTIONS.get(game_external_id, [])
+    for player_ws in player_websockets:
+        try:
+            await player_ws.send_text(
+                json.dumps(
+                    {
+                        "topic": "fog_erace_point.add",
+                        "data": {
+                            "x": fog_point.x,
+                            "y": fog_point.y,
+                            "map_external_id": gmap.external_id,
+                            "radius": fog_point.radius,
+                            "created_at": (
+                                fog_point.created_at.isoformat()
+                                if fog_point.created_at
+                                else None
+                            ),
+                        },
+                    }
+                )
+            )
+
+        except Exception:
+            logger.exception("Connection is lost")
+            player_websockets.remove(player_ws)
+
+    return FogEracePointFacade(
+        x=fog_point.x,
+        y=fog_point.y,
+        map_external_id=gmap.external_id,
+        radius=fog_point.radius,
+        created_at=(
+            fog_point.created_at.isoformat() if fog_point.created_at else None
+        ),
+    )
+
+
+@app.get("/api/game/{game_external_id}/fog-erace-points")
+async def get_fog_erace_points_handler(
+    game_external_id: str,
+) -> List[FogEracePointFacade]:
+    gmap = await database.Map.find_by_game_external_id(game_external_id)
+    assert gmap
+
+    fog_points = await database.FogEracePoint.find_by_map_id(gmap.id)
+
+    results = []
+    for fog_point in fog_points:
+        results.append(
+            FogEracePointFacade(
+                x=fog_point.x,
+                y=fog_point.y,
+                map_external_id=gmap.external_id,
+                radius=fog_point.radius,
+                created_at=(
+                    fog_point.created_at.isoformat()
+                    if fog_point.created_at
+                    else None
+                ),
+            )
+        )
+
+    return results
+
+
 @app.websocket("/ws/game/{game_external_id}/get")
 async def get_map_stream_handler(game_external_id: str, websocket: WebSocket):
     await websocket.accept()
