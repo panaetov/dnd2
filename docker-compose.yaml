@@ -124,6 +124,7 @@ services:
       - "10000-10200:10000-10200/udp"
     volumes:
       - ./janus/janus.transport.http.jcfg:/opt/janus/etc/janus/janus.transport.http.jcfg
+      - ./janus/janus.jcfg:/opt/janus/etc/janus/janus.jcfg
 
   backend:
     build:
@@ -145,10 +146,9 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf
       - ./nginx/certs:/etc/nginx/certs
-    depends_on:
-      - web
     networks:
       - jitsi
+
   db:
     image: postgres:16
     restart: always

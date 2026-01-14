@@ -403,6 +403,7 @@ async def update_map_handler(
 
     player_websockets: List[WebSocket] = ACTIVE_CONNECTIONS.get(game_external_id, [])
     for player_ws in player_websockets:
+        logger.info(f"Sending updates to player.")
         try:
             await player_ws.send_text(
                 json.dumps(
@@ -414,7 +415,7 @@ async def update_map_handler(
             )
 
         except Exception:
-            logger.exception("Connection is lost")
+            logger.exception("Cannot send updates to ws, closing ws.")
             player_websockets.remove(player_ws)
 
     return gmap
@@ -538,6 +539,7 @@ async def get_map_stream_handler(game_external_id: str, websocket: WebSocket):
     websockets.append(websocket)
     while True:
         try:
+            logger.info("Looping ws connection...")
             await websocket.receive_text()
         except Exception:
             logger.info(f"Connect from game {game_external_id} is closed")
