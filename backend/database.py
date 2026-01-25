@@ -51,6 +51,8 @@ class Game(BaseModel):
     master_join_link: str
     master_avatar_url: str
 
+    room_id: str
+
     @classmethod
     async def find_by_external_id(cls, external_id):
         async with _POOL.acquire() as conn:

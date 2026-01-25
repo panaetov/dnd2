@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS games (
     name TEXT NOT NULL,
     external_id TEXT UNIQUE NOT NULL,
 
+    room_id TEXT NOT NULL,
     master_id integer NOT NULL REFERENCES masters(id),
     master_join_link TEXT NOT NULL,
     master_avatar_url TEXT NOT NULL

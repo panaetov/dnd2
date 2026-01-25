@@ -46,6 +46,7 @@ app.add_middleware(
 
 class JoinResponse(pydantic.BaseModel):
     game_id: str
+    room_id: str
     user_id: str
     is_master: bool
 
@@ -82,6 +83,7 @@ async def join_handler(link: str) -> JoinResponse:
         game_id=game.external_id,
         user_id=user_id,
         is_master=is_master,
+        room_id=game.room_id,
     )
 
 
