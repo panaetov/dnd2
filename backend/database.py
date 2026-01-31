@@ -50,9 +50,7 @@ class Game(BaseModel):
     master_id: int
     master_join_link: str
     master_avatar_url: str
-    room_id: int | None = None
-
-    room_id: str
+    room_id: int
 
     @classmethod
     async def find_by_external_id(cls, external_id):
@@ -139,7 +137,7 @@ class FogEracePoint(BaseModel):
         async with _POOL.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT * FROM fog_erace_points 
+                SELECT * FROM fog_erace_points
                 WHERE x = $1 AND y = $2 AND map_id = $3 AND radius = $4
                 """,
                 x,

@@ -51,10 +51,9 @@ app.add_middleware(
 
 class JoinResponse(pydantic.BaseModel):
     game_id: str
-    room_id: str
+    room_id: int
     user_id: str
     is_master: bool
-    room_id: int | None = None
 
 
 @app.get("/api/join/{link}")
@@ -453,9 +452,7 @@ async def create_fog_erace_point_handler(
     gmap = await database.Map.find_by_game_external_id(game_external_id)
     assert gmap
 
-    await database.FogEracePoint.add(
-        payload.x, payload.y, gmap.id, payload.radius
-    )
+    await database.FogEracePoint.add(payload.x, payload.y, gmap.id, payload.radius)
 
     fog_point = await database.FogEracePoint.find_by_params(
         payload.x, payload.y, gmap.id, payload.radius
@@ -493,9 +490,7 @@ async def create_fog_erace_point_handler(
         y=fog_point.y,
         map_external_id=gmap.external_id,
         radius=fog_point.radius,
-        created_at=(
-            fog_point.created_at.isoformat() if fog_point.created_at else None
-        ),
+        created_at=(fog_point.created_at.isoformat() if fog_point.created_at else None),
     )
 
 
@@ -517,9 +512,7 @@ async def get_fog_erace_points_handler(
                 map_external_id=gmap.external_id,
                 radius=fog_point.radius,
                 created_at=(
-                    fog_point.created_at.isoformat()
-                    if fog_point.created_at
-                    else None
+                    fog_point.created_at.isoformat() if fog_point.created_at else None
                 ),
             )
         )
@@ -666,7 +659,10 @@ async def play_audio_in_room(
 
 
 async def play_video_in_room(
-    video_url: str, room_id: int, duration_seconds: float | None = None, display_name: str = "Video Player"
+    video_url: str,
+    room_id: int,
+    duration_seconds: float | None = None,
+    display_name: str = "Video Player",
 ):
     """Проигрывает видео файл в Janus комнате в фоновой корутине"""
     try:
@@ -725,17 +721,15 @@ class PlayVideoRequest(pydantic.BaseModel):
 
 
 @app.post("/api/game/{game_external_id}/audio/play")
-async def play_audio_handler(
-    game_external_id: str, payload: PlayAudioRequest
-) -> dict:
+async def play_audio_handler(game_external_id: str, payload: PlayAudioRequest) -> dict:
     game = await database.Game.find_by_external_id(game_external_id)
     assert game
     assert game.room_id is not None, "Game room_id is not set"
 
-    audio_file = await database.AudioFile.find_by_external_id(
-        payload.audio_external_id
-    )
-    assert audio_file, f"Audio file with external_id {payload.audio_external_id} not found"
+    audio_file = await database.AudioFile.find_by_external_id(payload.audio_external_id)
+    assert (
+        audio_file
+    ), f"Audio file with external_id {payload.audio_external_id} not found"
     assert audio_file.game_id == game.id, "Audio file does not belong to this game"
 
     # Запускаем проигрывание аудио в фоновой корутине
@@ -759,22 +753,23 @@ async def play_audio_handler(
 
 
 @app.post("/api/game/{game_external_id}/audio/stop")
-async def stop_audio_handler(
-    game_external_id: str, payload: PlayAudioRequest
-) -> dict:
+async def stop_audio_handler(game_external_id: str, payload: PlayAudioRequest) -> dict:
     game = await database.Game.find_by_external_id(game_external_id)
     assert game
 
-    audio_file = await database.AudioFile.find_by_external_id(
-        payload.audio_external_id
-    )
-    assert audio_file, f"Audio file with external_id {payload.audio_external_id} not found"
+    audio_file = await database.AudioFile.find_by_external_id(payload.audio_external_id)
+    assert (
+        audio_file
+    ), f"Audio file with external_id {payload.audio_external_id} not found"
     assert audio_file.game_id == game.id, "Audio file does not belong to this game"
 
     plugin_key = f"{game_external_id}:{audio_file.external_id}"
 
     if plugin_key not in ACTIVE_AUDIO_PLUGINS:
-        return {"status": "not_found", "message": "Audio playback not found or already stopped"}
+        return {
+            "status": "not_found",
+            "message": "Audio playback not found or already stopped",
+        }
 
     plugin, session, task = ACTIVE_AUDIO_PLUGINS[plugin_key]
 
@@ -808,17 +803,15 @@ async def stop_audio_handler(
 
 
 @app.post("/api/game/{game_external_id}/video/play")
-async def play_video_handler(
-    game_external_id: str, payload: PlayVideoRequest
-) -> dict:
+async def play_video_handler(game_external_id: str, payload: PlayVideoRequest) -> dict:
     game = await database.Game.find_by_external_id(game_external_id)
     assert game
     assert game.room_id is not None, "Game room_id is not set"
 
-    video_file = await database.VideoFile.find_by_external_id(
-        payload.video_external_id
-    )
-    assert video_file, f"Video file with external_id {payload.video_external_id} not found"
+    video_file = await database.VideoFile.find_by_external_id(payload.video_external_id)
+    assert (
+        video_file
+    ), f"Video file with external_id {payload.video_external_id} not found"
     assert video_file.game_id == game.id, "Video file does not belong to this game"
 
     # Запускаем проигрывание видео в фоновой корутине
