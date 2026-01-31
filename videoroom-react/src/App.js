@@ -17,6 +17,20 @@ function App() {
     script.async = true;
     
     adapterScript.onload = () => {
+      // Wait a bit for adapter to initialize navigator.mediaDevices polyfill
+      setTimeout(() => {
+        script.onload = () => {
+          if (window.Janus) {
+            setJanusLoaded(true);
+          }
+        };
+        document.body.appendChild(script);
+      }, 100);
+    };
+    
+    adapterScript.onerror = () => {
+      console.error('Failed to load webrtc-adapter');
+      // Still try to load janus.js
       script.onload = () => {
         if (window.Janus) {
           setJanusLoaded(true);

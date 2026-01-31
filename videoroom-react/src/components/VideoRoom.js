@@ -109,6 +109,17 @@ const VideoRoom = () => {
       return;
     }
 
+    // Check if getUserMedia is available (with polyfill support for HTTP)
+    const hasGetUserMedia = (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) ||
+                           (navigator.getUserMedia) ||
+                           (navigator.webkitGetUserMedia) ||
+                           (navigator.mozGetUserMedia);
+    
+    if (!hasGetUserMedia) {
+      safeAlert("getUserMedia is not available in this browser. Please check your browser settings.");
+      return;
+    }
+
     setStarted(true);
 
     // Create Janus session
