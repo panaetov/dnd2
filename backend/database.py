@@ -50,6 +50,7 @@ class Game(BaseModel):
     master_id: int
     master_join_link: str
     master_avatar_url: str
+    room_id: int | None = None
 
     @classmethod
     async def find_by_external_id(cls, external_id):
@@ -374,6 +375,68 @@ class Item(BaseModel):
             rows = await conn.fetch(
                 """
                 SELECT * FROM items where game_id = $1;
+                """,
+                game_id,
+            )
+            return [cls(**dict(row)) for row in rows]
+
+
+class AudioFile(BaseModel):
+    id: int = 0
+    external_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+    name: str
+    game_id: int
+    url: str
+    duration_seconds: float | None = None
+
+    @classmethod
+    async def find_by_external_id(cls, external_id):
+        async with _POOL.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT * FROM audio_files where external_id = $1;
+                """,
+                external_id,
+            )
+            return cls(**dict(row)) if row else None
+
+    @classmethod
+    async def find_by_game_id(cls, game_id):
+        async with _POOL.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT * FROM audio_files where game_id = $1;
+                """,
+                game_id,
+            )
+            return [cls(**dict(row)) for row in rows]
+
+
+class VideoFile(BaseModel):
+    id: int = 0
+    external_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+    name: str
+    game_id: int
+    url: str
+    duration_seconds: float | None = None
+
+    @classmethod
+    async def find_by_external_id(cls, external_id):
+        async with _POOL.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT * FROM video_files where external_id = $1;
+                """,
+                external_id,
+            )
+            return cls(**dict(row)) if row else None
+
+    @classmethod
+    async def find_by_game_id(cls, game_id):
+        async with _POOL.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT * FROM video_files where game_id = $1;
                 """,
                 game_id,
             )

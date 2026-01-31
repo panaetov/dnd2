@@ -16,3 +16,11 @@ DB_CONFIG = {
     "password": "dude_password_123",
     "database": DATABASE_NAME,
 }
+
+JANUS_URL = os.environ.get("JANUS_URL", "http://51.250.102.96:8088/janus")
+
+TURN_SERVER_URL = os.environ.get("TURN_SERVER_URL", "turn:free.expressturn.com:3478")
+TURN_SERVER_USERNAME = os.environ.get("TURN_SERVER_USERNAME", "000000002084126365")
+TURN_SERVER_CREDENTIAL = os.environ.get("TURN_SERVER_CREDENTIAL", "4kbbi1XtfrmjnuxOkgfmU1gF6zw=")
+
+STUN_SERVER_URL = os.environ.get("STUN_SERVER_URL", "stun:stun.l.google.com:19302")

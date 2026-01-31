@@ -1,13 +1,18 @@
+import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
 from typing import Dict, List
 
 import pydantic
+from aiortc import RTCConfiguration, RTCIceServer
+from aiortc.contrib.media import MediaPlayer
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+from janus_client import JanusSession, JanusVideoRoomPlugin
 
 import database
+import settings
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,6 +53,7 @@ class JoinResponse(pydantic.BaseModel):
     game_id: str
     user_id: str
     is_master: bool
+    room_id: int | None = None
 
 
 @app.get("/api/join/{link}")
@@ -82,6 +88,7 @@ async def join_handler(link: str) -> JoinResponse:
         game_id=game.external_id,
         user_id=user_id,
         is_master=is_master,
+        room_id=game.room_id,
     )
 
 
@@ -289,6 +296,9 @@ async def get_character_handler(
 
 
 ACTIVE_CONNECTIONS: Dict[str, List[WebSocket]] = {}
+
+# Хранилище активных audio plugins: ключ - f"{game_external_id}:{audio_external_id}", значение - (plugin, session, task)
+ACTIVE_AUDIO_PLUGINS: Dict[str, tuple] = {}
 
 
 class DiceStartedRequest(pydantic.BaseModel):
@@ -514,6 +524,318 @@ async def get_fog_erace_points_handler(
         )
 
     return results
+
+
+class AudioFileFacade(pydantic.BaseModel):
+    external_id: str
+    name: str
+
+
+class VideoFileFacade(pydantic.BaseModel):
+    external_id: str
+    name: str
+
+
+@app.get("/api/game/{game_external_id}/audio-files")
+async def get_audio_files_handler(
+    game_external_id: str,
+) -> List[AudioFileFacade]:
+    game = await database.Game.find_by_external_id(game_external_id)
+    assert game
+
+    audio_files = await database.AudioFile.find_by_game_id(game.id)
+
+    results = []
+    for audio_file in audio_files:
+        results.append(
+            AudioFileFacade(
+                external_id=audio_file.external_id,
+                name=audio_file.name,
+            )
+        )
+
+    return results
+
+
+@app.get("/api/game/{game_external_id}/video-files")
+async def get_video_files_handler(
+    game_external_id: str,
+) -> List[VideoFileFacade]:
+    game = await database.Game.find_by_external_id(game_external_id)
+    assert game
+
+    video_files = await database.VideoFile.find_by_game_id(game.id)
+
+    results = []
+    for video_file in video_files:
+        results.append(
+            VideoFileFacade(
+                external_id=video_file.external_id,
+                name=video_file.name,
+            )
+        )
+
+    return results
+
+
+async def play_audio_in_room(
+    audio_url: str,
+    room_id: int,
+    game_external_id: str,
+    audio_external_id: str,
+    duration_seconds: float | None = None,
+    display_name: str = "Audio Player",
+):
+    """Проигрывает аудио файл в Janus комнате в фоновой корутине"""
+    plugin_key = f"{game_external_id}:{audio_external_id}"
+    plugin = None
+    session = None
+    try:
+        config = RTCConfiguration(
+            iceServers=[
+                RTCIceServer(
+                    urls=settings.TURN_SERVER_URL,
+                    username=settings.TURN_SERVER_USERNAME,
+                    credential=settings.TURN_SERVER_CREDENTIAL,
+                ),
+                RTCIceServer(
+                    urls=settings.STUN_SERVER_URL,
+                ),
+            ]
+        )
+        session = JanusSession(base_url=settings.JANUS_URL)
+        plugin = JanusVideoRoomPlugin(pc_config=config)
+
+        # Attach to Janus session
+        await plugin.attach(session=session)
+        await plugin.join_as_publisher(room_id=room_id, display=display_name)
+
+        logger.info(f"Starting audio playback: {audio_url} in room {room_id}")
+
+        # Prepare media player
+        player = MediaPlayer(audio_url)
+        await plugin.publish(player)
+
+        # Сохраняем plugin и session в глобальную переменную
+        task = asyncio.current_task()
+        ACTIVE_AUDIO_PLUGINS[plugin_key] = (plugin, session, task)
+
+        # Wait for audio to finish
+        if duration_seconds is not None:
+            logger.info(f"Waiting {duration_seconds} seconds for audio to finish")
+            await asyncio.sleep(duration_seconds)
+        else:
+            # If duration is not specified, wait indefinitely until cancelled
+            try:
+                while True:
+                    await asyncio.sleep(1)
+            except asyncio.CancelledError:
+                logger.info(f"Audio playback cancelled for room {room_id}")
+
+        # Удаляем из активных после завершения
+        if plugin_key in ACTIVE_AUDIO_PLUGINS:
+            del ACTIVE_AUDIO_PLUGINS[plugin_key]
+
+        await plugin.leave()
+        await plugin.destroy()
+        await session.destroy()
+
+        logger.info(f"Audio playback finished for room {room_id}")
+    except asyncio.CancelledError:
+        logger.info(f"Audio playback task cancelled for {plugin_key}")
+        # Удаляем из активных при отмене
+        if plugin_key in ACTIVE_AUDIO_PLUGINS:
+            del ACTIVE_AUDIO_PLUGINS[plugin_key]
+        if plugin:
+            try:
+                await plugin.leave()
+                await plugin.destroy()
+            except Exception:
+                pass
+        if session:
+            try:
+                await session.destroy()
+            except Exception:
+                pass
+    except Exception as e:
+        logger.exception(f"Error playing audio in room {room_id}: {e}")
+        # Удаляем из активных при ошибке
+        if plugin_key in ACTIVE_AUDIO_PLUGINS:
+            del ACTIVE_AUDIO_PLUGINS[plugin_key]
+
+
+async def play_video_in_room(
+    video_url: str, room_id: int, duration_seconds: float | None = None, display_name: str = "Video Player"
+):
+    """Проигрывает видео файл в Janus комнате в фоновой корутине"""
+    try:
+        config = RTCConfiguration(
+            iceServers=[
+                RTCIceServer(
+                    urls=settings.TURN_SERVER_URL,
+                    username=settings.TURN_SERVER_USERNAME,
+                    credential=settings.TURN_SERVER_CREDENTIAL,
+                ),
+                RTCIceServer(
+                    urls=settings.STUN_SERVER_URL,
+                ),
+            ]
+        )
+        session = JanusSession(base_url=settings.JANUS_URL)
+        plugin = JanusVideoRoomPlugin(pc_config=config)
+
+        # Attach to Janus session
+        await plugin.attach(session=session)
+        await plugin.join_as_publisher(room_id=room_id, display=display_name)
+
+        logger.info(f"Starting video playback: {video_url} in room {room_id}")
+
+        # Prepare media player
+        player = MediaPlayer(video_url)
+        await plugin.publish(player)
+
+        # Wait for video to finish
+        if duration_seconds is not None:
+            logger.info(f"Waiting {duration_seconds} seconds for video to finish")
+            await asyncio.sleep(duration_seconds)
+        else:
+            # If duration is not specified, wait indefinitely until cancelled
+            try:
+                while True:
+                    await asyncio.sleep(1)
+            except asyncio.CancelledError:
+                logger.info(f"Video playback cancelled for room {room_id}")
+
+        await plugin.leave()
+        await plugin.destroy()
+        await session.destroy()
+
+        logger.info(f"Video playback finished for room {room_id}")
+    except Exception as e:
+        logger.exception(f"Error playing video in room {room_id}: {e}")
+
+
+class PlayAudioRequest(pydantic.BaseModel):
+    audio_external_id: str
+
+
+class PlayVideoRequest(pydantic.BaseModel):
+    video_external_id: str
+
+
+@app.post("/api/game/{game_external_id}/audio/play")
+async def play_audio_handler(
+    game_external_id: str, payload: PlayAudioRequest
+) -> dict:
+    game = await database.Game.find_by_external_id(game_external_id)
+    assert game
+    assert game.room_id is not None, "Game room_id is not set"
+
+    audio_file = await database.AudioFile.find_by_external_id(
+        payload.audio_external_id
+    )
+    assert audio_file, f"Audio file with external_id {payload.audio_external_id} not found"
+    assert audio_file.game_id == game.id, "Audio file does not belong to this game"
+
+    # Запускаем проигрывание аудио в фоновой корутине
+    asyncio.create_task(
+        play_audio_in_room(
+            audio_url=audio_file.url,
+            room_id=game.room_id,
+            game_external_id=game_external_id,
+            audio_external_id=audio_file.external_id,
+            duration_seconds=audio_file.duration_seconds,
+            display_name=f"Audio: {audio_file.name}",
+        )
+    )
+
+    logger.info(
+        f"Started audio playback: {audio_file.name} (external_id: {audio_file.external_id}) "
+        f"in game {game_external_id}, room {game.room_id}"
+    )
+
+    return {"status": "started", "audio_external_id": audio_file.external_id}
+
+
+@app.post("/api/game/{game_external_id}/audio/stop")
+async def stop_audio_handler(
+    game_external_id: str, payload: PlayAudioRequest
+) -> dict:
+    game = await database.Game.find_by_external_id(game_external_id)
+    assert game
+
+    audio_file = await database.AudioFile.find_by_external_id(
+        payload.audio_external_id
+    )
+    assert audio_file, f"Audio file with external_id {payload.audio_external_id} not found"
+    assert audio_file.game_id == game.id, "Audio file does not belong to this game"
+
+    plugin_key = f"{game_external_id}:{audio_file.external_id}"
+
+    if plugin_key not in ACTIVE_AUDIO_PLUGINS:
+        return {"status": "not_found", "message": "Audio playback not found or already stopped"}
+
+    plugin, session, task = ACTIVE_AUDIO_PLUGINS[plugin_key]
+
+    try:
+        # Отменяем задачу проигрывания
+        if task and not task.done():
+            task.cancel()
+
+        # Останавливаем plugin
+        await plugin.leave()
+        await plugin.destroy()
+
+        # Уничтожаем session
+        await session.destroy()
+
+        # Удаляем из активных
+        del ACTIVE_AUDIO_PLUGINS[plugin_key]
+
+        logger.info(
+            f"Stopped audio playback: {audio_file.name} (external_id: {audio_file.external_id}) "
+            f"in game {game_external_id}"
+        )
+
+        return {"status": "stopped", "audio_external_id": audio_file.external_id}
+    except Exception as e:
+        logger.exception(f"Error stopping audio playback: {e}")
+        # Удаляем из активных даже при ошибке
+        if plugin_key in ACTIVE_AUDIO_PLUGINS:
+            del ACTIVE_AUDIO_PLUGINS[plugin_key]
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/game/{game_external_id}/video/play")
+async def play_video_handler(
+    game_external_id: str, payload: PlayVideoRequest
+) -> dict:
+    game = await database.Game.find_by_external_id(game_external_id)
+    assert game
+    assert game.room_id is not None, "Game room_id is not set"
+
+    video_file = await database.VideoFile.find_by_external_id(
+        payload.video_external_id
+    )
+    assert video_file, f"Video file with external_id {payload.video_external_id} not found"
+    assert video_file.game_id == game.id, "Video file does not belong to this game"
+
+    # Запускаем проигрывание видео в фоновой корутине
+    asyncio.create_task(
+        play_video_in_room(
+            video_url=video_file.url,
+            room_id=game.room_id,
+            duration_seconds=video_file.duration_seconds,
+            display_name=f"Video: {video_file.name}",
+        )
+    )
+
+    logger.info(
+        f"Started video playback: {video_file.name} (external_id: {video_file.external_id}) "
+        f"in game {game_external_id}, room {game.room_id}"
+    )
+
+    return {"status": "started", "video_external_id": video_file.external_id}
 
 
 @app.websocket("/ws/game/{game_external_id}/get")

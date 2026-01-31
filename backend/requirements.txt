@@ -2,3 +2,5 @@ fastapi[standard]
 pydantic
 asyncpg
 slixmpp
+aiortc
+janus-client==0.9.0

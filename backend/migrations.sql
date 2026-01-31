@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS games (
     name TEXT NOT NULL,
     external_id TEXT UNIQUE NOT NULL,
 
+    room_id TEXT NOT NULL,
     master_id integer NOT NULL REFERENCES masters(id),
     master_join_link TEXT NOT NULL,
     master_avatar_url TEXT NOT NULL
@@ -42,6 +43,32 @@ CREATE TABLE IF NOT EXISTS characters (
     x int NULL,
     y int NULL,
     map_id integer NULL REFERENCES maps(id)
+);
+
+
+CREATE TABLE IF NOT EXISTS audio_files (
+    id serial PRIMARY KEY,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+
+    name TEXT NOT NULL,
+    external_id TEXT UNIQUE NOT NULL,
+
+    game_id int NOT NULL REFERENCES games(id),
+    url TEXT NOT NULL
+);
+
+
+CREATE TABLE IF NOT EXISTS video_files (
+    id serial PRIMARY KEY,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+
+    external_id TEXT UNIQUE NOT NULL,
+
+    game_id int NOT NULL REFERENCES games(id),
+    url TEXT NOT NULL,
+    duration_seconds int NOT NULL
 );
 
 
@@ -88,6 +115,18 @@ CREATE TABLE IF NOT EXISTS fog_erace_points (
     radius int not NULL,
     CONSTRAINT fog_unique_x_y UNIQUE (x, y, map_id, radius)
 );
+
+insert into audio_files (external_id, name, game_id, url, duration_seconds) values
+('audio-fight', 'fight', 1, 'https://storage.yandexcloud.net/dnd2/audio/fight.mp3', 60),
+('audio-horror', 'horror', 1, 'https://storage.yandexcloud.net/dnd2/audio/horror.mp3', 60),
+('audio-ambient', 'ambient', 1, 'https://storage.yandexcloud.net/dnd2/audio/ambient.mp3', 60),
+('audio-fire', 'fire', 1, 'https://storage.yandexcloud.net/dnd2/audio/fire.mp3', 60);
+
+insert into video_files (external_id, name, game_id, url, duration_seconds) values
+('video-1', '1', 1, 'https://storage.yandexcloud.net/dnd2/video/1.mp4', 10),
+('video-2', '2', 1, 'https://storage.yandexcloud.net/dnd2/video/2.mp4', 10),
+('video-3', '3', 1, 'https://storage.yandexcloud.net/dnd2/video/3.mp4', 10),
+('video-4', '4', 1, 'https://storage.yandexcloud.net/dnd2/video/4.mp4', 10);
 
 
 insert into masters (external_id) values ('alexey');
