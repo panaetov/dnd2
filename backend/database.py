@@ -52,6 +52,8 @@ class Game(BaseModel):
     master_avatar_url: str
     room_id: int | None = None
 
+    room_id: str
+
     @classmethod
     async def find_by_external_id(cls, external_id):
         async with _POOL.acquire() as conn:

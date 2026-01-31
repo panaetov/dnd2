@@ -51,6 +51,7 @@ app.add_middleware(
 
 class JoinResponse(pydantic.BaseModel):
     game_id: str
+    room_id: str
     user_id: str
     is_master: bool
     room_id: int | None = None
