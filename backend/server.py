@@ -585,18 +585,19 @@ async def play_audio_in_room(
     plugin = None
     session = None
     try:
-        config = RTCConfiguration(
-            iceServers=[
-                RTCIceServer(
-                    urls=settings.TURN_SERVER_URL,
-                    username=settings.TURN_SERVER_USERNAME,
-                    credential=settings.TURN_SERVER_CREDENTIAL,
-                ),
-                RTCIceServer(
-                    urls=settings.STUN_SERVER_URL,
-                ),
-            ]
-        )
+        # Создаем список ICE серверов со всеми TURN серверами
+        ice_servers = [
+            RTCIceServer(
+                urls=turn_url,
+                username=settings.TURN_SERVER_USERNAME,
+                credential=settings.TURN_SERVER_CREDENTIAL,
+            )
+            for turn_url in settings.TURN_SERVERS
+        ]
+        # Добавляем STUN сервер
+        ice_servers.append(RTCIceServer(urls=settings.STUN_SERVER_URL))
+
+        config = RTCConfiguration(iceServers=ice_servers)
         session = JanusSession(base_url=settings.JANUS_URL)
         plugin = JanusVideoRoomPlugin(pc_config=config)
 
@@ -666,18 +667,19 @@ async def play_video_in_room(
 ):
     """Проигрывает видео файл в Janus комнате в фоновой корутине"""
     try:
-        config = RTCConfiguration(
-            iceServers=[
-                RTCIceServer(
-                    urls=settings.TURN_SERVER_URL,
-                    username=settings.TURN_SERVER_USERNAME,
-                    credential=settings.TURN_SERVER_CREDENTIAL,
-                ),
-                RTCIceServer(
-                    urls=settings.STUN_SERVER_URL,
-                ),
-            ]
-        )
+        # Создаем список ICE серверов со всеми TURN серверами
+        ice_servers = [
+            RTCIceServer(
+                urls=turn_url,
+                username=settings.TURN_SERVER_USERNAME,
+                credential=settings.TURN_SERVER_CREDENTIAL,
+            )
+            for turn_url in settings.TURN_SERVERS
+        ]
+        # Добавляем STUN сервер
+        ice_servers.append(RTCIceServer(urls=settings.STUN_SERVER_URL))
+
+        config = RTCConfiguration(iceServers=ice_servers)
         session = JanusSession(base_url=settings.JANUS_URL)
         plugin = JanusVideoRoomPlugin(pc_config=config)
 
