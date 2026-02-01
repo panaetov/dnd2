@@ -609,7 +609,7 @@ async def play_audio_in_room(
 
         # Prepare media player
         player = MediaPlayer(audio_url)
-        await plugin.publish(player)
+        await plugin.publish(player, bitrate=2000000)
 
         # Сохраняем plugin и session в глобальную переменную
         task = asyncio.current_task()
@@ -689,9 +689,14 @@ async def play_video_in_room(
 
         logger.info(f"Starting video playback: {video_url} in room {room_id}")
 
-        # Prepare media player
+
         player = MediaPlayer(video_url)
-        await plugin.publish(player)
+
+        await plugin.publish(
+            player=player,
+            bitrate=2000000,
+            trickle=True,
+        )
 
         # Wait for video to finish
         if duration_seconds is not None:
