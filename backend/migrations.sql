@@ -55,7 +55,8 @@ CREATE TABLE IF NOT EXISTS audio_files (
     external_id TEXT UNIQUE NOT NULL,
 
     game_id int NOT NULL REFERENCES games(id),
-    url TEXT NOT NULL
+    url TEXT NOT NULL,
+    duration_seconds int NOT NULL
 );
 
 
@@ -64,6 +65,7 @@ CREATE TABLE IF NOT EXISTS video_files (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
 
+    name TEXT NOT NULL,
     external_id TEXT UNIQUE NOT NULL,
 
     game_id int NOT NULL REFERENCES games(id),
