@@ -300,6 +300,9 @@ ACTIVE_CONNECTIONS: Dict[str, List[WebSocket]] = {}
 # Хранилище активных audio plugins: ключ - f"{game_external_id}:{audio_external_id}", значение - (plugin, session, task)
 ACTIVE_AUDIO_PLUGINS: Dict[str, tuple] = {}
 
+# Хранилище активных video plugins: ключ - f"{game_external_id}:{video_external_id}", значение - (plugin, session, task)
+ACTIVE_VIDEO_PLUGINS: Dict[str, tuple] = {}
+
 
 class DiceStartedRequest(pydantic.BaseModel):
     dice_id: str
@@ -579,6 +582,7 @@ async def play_audio_in_room(
     audio_external_id: str,
     duration_seconds: float | None = None,
     display_name: str = "Audio Player",
+    volume: float = 1.0,
 ):
     """Проигрывает аудио файл в Janus комнате в фоновой корутине"""
     plugin_key = f"{game_external_id}:{audio_external_id}"
@@ -605,10 +609,17 @@ async def play_audio_in_room(
         await plugin.attach(session=session)
         await plugin.join_as_publisher(room_id=room_id, display=display_name)
 
-        logger.info(f"Starting audio playback: {audio_url} in room {room_id}")
+        logger.info(
+            f"Starting audio playback: {audio_url} in room {room_id} with volume {volume}"
+        )
 
-        # Prepare media player
-        player = MediaPlayer(audio_url)
+        # Prepare media player с настройкой громкости через ffmpeg фильтр
+        player_options = {}
+        if volume != 1.0:
+            # Применяем фильтр громкости через ffmpeg
+            player_options = {"-af": f"volume={volume}"}
+
+        player = MediaPlayer(audio_url, options=player_options)
         await plugin.publish(player, bitrate=2000000)
 
         # Сохраняем plugin и session в глобальную переменную
@@ -662,10 +673,15 @@ async def play_audio_in_room(
 async def play_video_in_room(
     video_url: str,
     room_id: int,
+    game_external_id: str,
+    video_external_id: str,
     duration_seconds: float | None = None,
     display_name: str = "Video Player",
 ):
     """Проигрывает видео файл в Janus комнате в фоновой корутине"""
+    plugin_key = f"{game_external_id}:{video_external_id}"
+    plugin = None
+    session = None
     try:
         # Создаем список ICE серверов со всеми TURN серверами
         ice_servers = [
@@ -698,6 +714,10 @@ async def play_video_in_room(
         logger.info("Plugin pulished.")
         logger.info("Player published.")
 
+        # Сохраняем plugin и session в глобальную переменную
+        task = asyncio.current_task()
+        ACTIVE_VIDEO_PLUGINS[plugin_key] = (plugin, session, task)
+
         # Wait for video to finish
         if duration_seconds is not None:
             logger.info(f"Waiting {duration_seconds} seconds for video to finish")
@@ -710,17 +730,41 @@ async def play_video_in_room(
             except asyncio.CancelledError:
                 logger.info(f"Video playback cancelled for room {room_id}")
 
+        # Удаляем из активных после завершения
+        if plugin_key in ACTIVE_VIDEO_PLUGINS:
+            del ACTIVE_VIDEO_PLUGINS[plugin_key]
+
         await plugin.leave()
         await plugin.destroy()
         await session.destroy()
 
         logger.info(f"Video playback finished for room {room_id}")
+    except asyncio.CancelledError:
+        logger.info(f"Video playback task cancelled for {plugin_key}")
+        # Удаляем из активных при отмене
+        if plugin_key in ACTIVE_VIDEO_PLUGINS:
+            del ACTIVE_VIDEO_PLUGINS[plugin_key]
+        if plugin:
+            try:
+                await plugin.leave()
+                await plugin.destroy()
+            except Exception:
+                pass
+        if session:
+            try:
+                await session.destroy()
+            except Exception:
+                pass
     except Exception as e:
         logger.exception(f"Error playing video in room {room_id}: {e}")
+        # Удаляем из активных при ошибке
+        if plugin_key in ACTIVE_VIDEO_PLUGINS:
+            del ACTIVE_VIDEO_PLUGINS[plugin_key]
 
 
 class PlayAudioRequest(pydantic.BaseModel):
     audio_external_id: str
+    volume: float = 1.0  # Громкость от 0.0 до 1.0, по умолчанию 1.0 (100%)
 
 
 class PlayVideoRequest(pydantic.BaseModel):
@@ -739,6 +783,10 @@ async def play_audio_handler(game_external_id: str, payload: PlayAudioRequest) -
     ), f"Audio file with external_id {payload.audio_external_id} not found"
     assert audio_file.game_id == game.id, "Audio file does not belong to this game"
 
+    # Проверяем диапазон громкости
+    if not (0.0 <= payload.volume <= 1.0):
+        return {"status": "error", "message": "Volume must be between 0.0 and 1.0"}
+
     # Запускаем проигрывание аудио в фоновой корутине
     asyncio.create_task(
         play_audio_in_room(
@@ -748,6 +796,7 @@ async def play_audio_handler(game_external_id: str, payload: PlayAudioRequest) -
             audio_external_id=audio_file.external_id,
             duration_seconds=audio_file.duration_seconds,
             display_name=f"Audio: {audio_file.name}",
+            volume=payload.volume,
         )
     )
 
@@ -770,7 +819,8 @@ async def stop_audio_handler(game_external_id: str, payload: PlayAudioRequest) -
     ), f"Audio file with external_id {payload.audio_external_id} not found"
     assert audio_file.game_id == game.id, "Audio file does not belong to this game"
 
-    plugin_key = f"{game_external_id}:{audio_file.external_id}"
+    # Ищем активное проигрывание по паре game_external_id + audio_external_id
+    plugin_key = f"{game_external_id}:{payload.audio_external_id}"
 
     if plugin_key not in ACTIVE_AUDIO_PLUGINS:
         return {
@@ -826,6 +876,8 @@ async def play_video_handler(game_external_id: str, payload: PlayVideoRequest) -
         play_video_in_room(
             video_url=video_file.url,
             room_id=game.room_id,
+            game_external_id=game_external_id,
+            video_external_id=video_file.external_id,
             duration_seconds=video_file.duration_seconds,
         )
     )
@@ -836,6 +888,56 @@ async def play_video_handler(game_external_id: str, payload: PlayVideoRequest) -
     )
 
     return {"status": "started", "video_external_id": video_file.external_id}
+
+
+@app.post("/api/game/{game_external_id}/video/stop")
+async def stop_video_handler(game_external_id: str, payload: PlayVideoRequest) -> dict:
+    game = await database.Game.find_by_external_id(game_external_id)
+    assert game
+
+    video_file = await database.VideoFile.find_by_external_id(payload.video_external_id)
+    assert (
+        video_file
+    ), f"Video file with external_id {payload.video_external_id} not found"
+    assert video_file.game_id == game.id, "Video file does not belong to this game"
+
+    plugin_key = f"{game_external_id}:{video_file.external_id}"
+
+    if plugin_key not in ACTIVE_VIDEO_PLUGINS:
+        return {
+            "status": "not_found",
+            "message": "Video playback not found or already stopped",
+        }
+
+    plugin, session, task = ACTIVE_VIDEO_PLUGINS[plugin_key]
+
+    try:
+        # Отменяем задачу проигрывания
+        if task and not task.done():
+            task.cancel()
+
+        # Останавливаем plugin
+        await plugin.leave()
+        await plugin.destroy()
+
+        # Уничтожаем session
+        await session.destroy()
+
+        # Удаляем из активных
+        del ACTIVE_VIDEO_PLUGINS[plugin_key]
+
+        logger.info(
+            f"Stopped video playback: {video_file.name} (external_id: {video_file.external_id}) "
+            f"in game {game_external_id}"
+        )
+
+        return {"status": "stopped", "video_external_id": video_file.external_id}
+    except Exception as e:
+        logger.exception(f"Error stopping video playback: {e}")
+        # Удаляем из активных даже при ошибке
+        if plugin_key in ACTIVE_VIDEO_PLUGINS:
+            del ACTIVE_VIDEO_PLUGINS[plugin_key]
+        return {"status": "error", "message": str(e)}
 
 
 @app.websocket("/ws/game/{game_external_id}/get")
