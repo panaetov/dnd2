@@ -690,12 +690,13 @@ async def play_video_in_room(
         logger.info(f"Starting video playback: {video_url} in room {room_id}")
 
         player = MediaPlayer(video_url)
-
         await plugin.publish(
             player=player,
             bitrate=2000000,
             trickle=True,
         )
+        logger.info("Plugin pulished.")
+        logger.info("Player published.")
 
         # Wait for video to finish
         if duration_seconds is not None:
