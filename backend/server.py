@@ -105,6 +105,7 @@ class ItemFacade(pydantic.BaseModel):
 
     x: int | None = None
     y: int | None = None
+    icon_url: str = ''
 
 
 @app.get("/api/game/{game_external_id}/items")
@@ -123,6 +124,7 @@ async def get_items_handler(game_external_id: str) -> List[ItemFacade]:
                 name=item.name,
                 x=item.x,
                 y=item.y,
+                icon_url=item.icon_url,
             )
         )
 
@@ -171,6 +173,7 @@ async def item_changed_handler(
         name=item.name,
         x=item.x,
         y=item.y,
+        icon_url=item.icon_url,
     )
 
 
