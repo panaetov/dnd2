@@ -103,8 +103,8 @@ class ItemFacade(pydantic.BaseModel):
 
     name: str
 
-    x: int | None = None
-    y: int | None = None
+    x: float | None = None
+    y: float | None = None
 
 
 @app.get("/api/game/{game_external_id}/items")
@@ -130,8 +130,8 @@ async def get_items_handler(game_external_id: str) -> List[ItemFacade]:
 
 
 class ItemChangedRequest(pydantic.BaseModel):
-    x: int | None = None
-    y: int | None = None
+    x: float | None = None
+    y: float | None = None
 
 
 @app.post("/api/game/{game_external_id}/item/{item_external_id}")
@@ -189,13 +189,13 @@ class CharacterFacade(pydantic.BaseModel):
     name: str
     color: str = "#ffffff"
     inventory: List[InventoryItem] = []
-    x: int | None = None
-    y: int | None = None
+    x: float | None = None
+    y: float | None = None
 
 
 class CharacterUpdateRequest(pydantic.BaseModel):
-    x: int | None = None
-    y: int | None = None
+    x: float | None = None
+    y: float | None = None
 
 
 @app.post("/api/game/{game_external_id}/character/{character_external_id}")
@@ -388,8 +388,8 @@ async def dice_resulted_handler(game_external_id: str, payload: DiceResultedRequ
 
 
 class MapUpdateRequest(pydantic.BaseModel):
-    x_center: int | None = None
-    y_center: int | None = None
+    x_center: float | None = None
+    y_center: float | None = None
     zoom: float | None = None
 
 
@@ -435,16 +435,16 @@ async def update_map_handler(
 
 
 class FogEracePointFacade(pydantic.BaseModel):
-    x: int
-    y: int
+    x: float
+    y: float
     map_external_id: str
     radius: int
     created_at: str | None = None
 
 
 class FogEracePointCreateRequest(pydantic.BaseModel):
-    x: int
-    y: int
+    x: float
+    y: float
     radius: int
 
 

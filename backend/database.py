@@ -88,8 +88,8 @@ class Game(BaseModel):
 
 class FogEracePoint(BaseModel):
     created_at: datetime.datetime | None = None
-    x: int
-    y: int
+    x: float
+    y: float
     map_id: int
     radius: int
 
@@ -163,8 +163,8 @@ class Character(BaseModel):
     inventory: List = []
     color: str
 
-    x: int | None = None
-    y: int | None = None
+    x: float | None = None
+    y: float | None = None
     map_id: int | None = None
 
     async def save(self):
@@ -231,8 +231,8 @@ class Map(BaseModel):
     game_id: int
     url: str
 
-    x_center: int
-    y_center: int
+    x_center: float
+    y_center: float
     zoom: float
 
     async def save(self):
@@ -313,8 +313,8 @@ class Item(BaseModel):
     external_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
 
     map_id: int | None = None
-    x: int | None = None
-    y: int | None = None
+    x: float | None = None
+    y: float | None = None
 
     icon_url: str
 
