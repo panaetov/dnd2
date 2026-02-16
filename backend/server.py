@@ -6,7 +6,7 @@ from typing import Dict, List
 
 import pydantic
 from aiortc import RTCConfiguration, RTCIceServer
-from aiortc.contrib.media import MediaPlayer
+from aiortc.contrib.media import MediaPlayer as AIORTCMediaPlayer
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from janus_client import JanusSession, JanusVideoRoomPlugin
@@ -21,6 +21,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 logger.setLevel("INFO")
+
+
+class MediaPlayer(AIORTCMediaPlayer):
+    """MediaPlayer with looping enabled by default."""
+
+    def __init__(self, *args, loop: bool = True, **kwargs):
+        kwargs.setdefault("loop", loop)
+        super().__init__(*args, **kwargs)
 
 
 @asynccontextmanager
@@ -622,7 +630,7 @@ async def play_audio_in_room(
             # Применяем фильтр громкости через ffmpeg
             player_options = {"-af": f"volume={volume}"}
 
-        player = MediaPlayer(audio_url, options=player_options)
+        player = MediaPlayer(audio_url, options=player_options, loop=False)
         await plugin.publish(player, bitrate=2000000)
 
         # Сохраняем plugin и session в глобальную переменную
@@ -774,6 +782,50 @@ class PlayVideoRequest(pydantic.BaseModel):
     video_external_id: str
 
 
+async def _stop_audio_playback_by_plugin_key(plugin_key: str) -> bool:
+    """Останавливает активное аудио по ключу game_external_id:audio_external_id."""
+    if plugin_key not in ACTIVE_AUDIO_PLUGINS:
+        return False
+
+    plugin, session, task = ACTIVE_AUDIO_PLUGINS[plugin_key]
+
+    try:
+        if task and not task.done():
+            task.cancel()
+
+        await plugin.leave()
+        await plugin.destroy()
+        await session.destroy()
+    except Exception:
+        logger.exception(f"Error while stopping audio plugin {plugin_key}")
+    finally:
+        ACTIVE_AUDIO_PLUGINS.pop(plugin_key, None)
+
+    return True
+
+
+async def _stop_video_playback_by_plugin_key(plugin_key: str) -> bool:
+    """Останавливает активное видео по ключу game_external_id:video_external_id."""
+    if plugin_key not in ACTIVE_VIDEO_PLUGINS:
+        return False
+
+    plugin, session, task = ACTIVE_VIDEO_PLUGINS[plugin_key]
+
+    try:
+        if task and not task.done():
+            task.cancel()
+
+        await plugin.leave()
+        await plugin.destroy()
+        await session.destroy()
+    except Exception:
+        logger.exception(f"Error while stopping video plugin {plugin_key}")
+    finally:
+        ACTIVE_VIDEO_PLUGINS.pop(plugin_key, None)
+
+    return True
+
+
 @app.post("/api/game/{game_external_id}/audio/play")
 async def play_audio_handler(game_external_id: str, payload: PlayAudioRequest) -> dict:
     game = await database.Game.find_by_external_id(game_external_id)
@@ -789,6 +841,17 @@ async def play_audio_handler(game_external_id: str, payload: PlayAudioRequest) -
     # Проверяем диапазон громкости
     if not (0.0 <= payload.volume <= 1.0):
         return {"status": "error", "message": "Volume must be between 0.0 and 1.0"}
+
+    # В игре может играть только один аудиофайл одновременно.
+    # Перед запуском нового трека останавливаем все текущие для этой игры.
+    game_plugin_prefix = f"{game_external_id}:"
+    active_game_audio_keys = [
+        plugin_key
+        for plugin_key in ACTIVE_AUDIO_PLUGINS
+        if plugin_key.startswith(game_plugin_prefix)
+    ]
+    for plugin_key in active_game_audio_keys:
+        await _stop_audio_playback_by_plugin_key(plugin_key)
 
     # Запускаем проигрывание аудио в фоновой корутине
     asyncio.create_task(
@@ -831,23 +894,8 @@ async def stop_audio_handler(game_external_id: str, payload: PlayAudioRequest) -
             "message": "Audio playback not found or already stopped",
         }
 
-    plugin, session, task = ACTIVE_AUDIO_PLUGINS[plugin_key]
-
     try:
-        # Отменяем задачу проигрывания
-        if task and not task.done():
-            task.cancel()
-
-        # Останавливаем plugin
-        await plugin.leave()
-        await plugin.destroy()
-
-        # Уничтожаем session
-        await session.destroy()
-
-        # Удаляем из активных
-        del ACTIVE_AUDIO_PLUGINS[plugin_key]
-
+        await _stop_audio_playback_by_plugin_key(plugin_key)
         logger.info(
             f"Stopped audio playback: {audio_file.name} (external_id: {audio_file.external_id}) "
             f"in game {game_external_id}"
@@ -857,8 +905,7 @@ async def stop_audio_handler(game_external_id: str, payload: PlayAudioRequest) -
     except Exception as e:
         logger.exception(f"Error stopping audio playback: {e}")
         # Удаляем из активных даже при ошибке
-        if plugin_key in ACTIVE_AUDIO_PLUGINS:
-            del ACTIVE_AUDIO_PLUGINS[plugin_key]
+        ACTIVE_AUDIO_PLUGINS.pop(plugin_key, None)
         return {"status": "error", "message": str(e)}
 
 
@@ -873,6 +920,17 @@ async def play_video_handler(game_external_id: str, payload: PlayVideoRequest) -
         video_file
     ), f"Video file with external_id {payload.video_external_id} not found"
     assert video_file.game_id == game.id, "Video file does not belong to this game"
+
+    # В игре может играть только один видеофайл одновременно.
+    # Перед запуском нового видео останавливаем все текущие для этой игры.
+    game_plugin_prefix = f"{game_external_id}:"
+    active_game_video_keys = [
+        plugin_key
+        for plugin_key in ACTIVE_VIDEO_PLUGINS
+        if plugin_key.startswith(game_plugin_prefix)
+    ]
+    for plugin_key in active_game_video_keys:
+        await _stop_video_playback_by_plugin_key(plugin_key)
 
     # Запускаем проигрывание видео в фоновой корутине
     asyncio.create_task(
@@ -912,23 +970,8 @@ async def stop_video_handler(game_external_id: str, payload: PlayVideoRequest) -
             "message": "Video playback not found or already stopped",
         }
 
-    plugin, session, task = ACTIVE_VIDEO_PLUGINS[plugin_key]
-
     try:
-        # Отменяем задачу проигрывания
-        if task and not task.done():
-            task.cancel()
-
-        # Останавливаем plugin
-        await plugin.leave()
-        await plugin.destroy()
-
-        # Уничтожаем session
-        await session.destroy()
-
-        # Удаляем из активных
-        del ACTIVE_VIDEO_PLUGINS[plugin_key]
-
+        await _stop_video_playback_by_plugin_key(plugin_key)
         logger.info(
             f"Stopped video playback: {video_file.name} (external_id: {video_file.external_id}) "
             f"in game {game_external_id}"
@@ -938,8 +981,7 @@ async def stop_video_handler(game_external_id: str, payload: PlayVideoRequest) -
     except Exception as e:
         logger.exception(f"Error stopping video playback: {e}")
         # Удаляем из активных даже при ошибке
-        if plugin_key in ACTIVE_VIDEO_PLUGINS:
-            del ACTIVE_VIDEO_PLUGINS[plugin_key]
+        ACTIVE_VIDEO_PLUGINS.pop(plugin_key, None)
         return {"status": "error", "message": str(e)}
 
 
