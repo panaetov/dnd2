@@ -6,12 +6,12 @@ from typing import Dict, List
 
 import pydantic
 from aiortc import RTCConfiguration, RTCIceServer
-from aiortc.contrib.media import MediaPlayer as AIORTCMediaPlayer
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from janus_client import JanusSession, JanusVideoRoomPlugin
 
 import database
+from media import MediaPlayer
 import settings
 
 logging.basicConfig(
@@ -21,14 +21,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 logger.setLevel("INFO")
-
-
-class MediaPlayer(AIORTCMediaPlayer):
-    """MediaPlayer with looping enabled by default."""
-
-    def __init__(self, *args, loop: bool = True, **kwargs):
-        kwargs.setdefault("loop", loop)
-        super().__init__(*args, **kwargs)
 
 
 @asynccontextmanager
@@ -716,7 +708,7 @@ async def play_video_in_room(
 
         logger.info(f"Starting video playback: {video_url} in room {room_id}")
 
-        player = MediaPlayer(video_url)
+        player = MediaPlayer(video_url, loop=True)
         await plugin.publish(
             player=player,
             bitrate=2000000,
