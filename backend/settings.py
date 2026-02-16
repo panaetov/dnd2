@@ -20,7 +20,9 @@ DB_CONFIG = {
 JANUS_URL = os.environ.get("JANUS_URL", "http://51.250.102.96:8088/janus")
 
 TURN_SERVER_USERNAME = os.environ.get("TURN_SERVER_USERNAME", "000000002084126365")
-TURN_SERVER_CREDENTIAL = os.environ.get("TURN_SERVER_CREDENTIAL", "4kbbi1XtfrmjnuxOkgfmU1gF6zw=")
+TURN_SERVER_CREDENTIAL = os.environ.get(
+    "TURN_SERVER_CREDENTIAL", "4kbbi1XtfrmjnuxOkgfmU1gF6zw="
+)
 
 STUN_SERVER_URL = os.environ.get("STUN_SERVER_URL", "stun:stun.l.google.com:19302")
 
@@ -46,6 +48,6 @@ TURN_SERVERS = [
     # "turn:relay16.expressturn.com:3478",
     # "turn:relay17.expressturn.com:3478",
     # "turn:relay18.expressturn.com:3478",
-    "turn:relay19.expressturn.com:3478",
+    # "turn:relay19.expressturn.com:3478",
     "turn:global.expressturn.com:3478",
 ]
