@@ -29,7 +29,8 @@ logger.setLevel("INFO")
 
 MASTER_JOIN_LINK_LENGTH = 12
 MASTER_JOIN_LINK_ALPHABET = string.ascii_letters + string.digits
-ROOM_ID_MAX = (2**32) - 1
+ROOM_ID_MIN = 1000
+ROOM_ID_MAX = 1099
 
 
 @asynccontextmanager
@@ -97,8 +98,9 @@ async def _generate_master_join_link() -> str:
 
 
 async def _generate_room_id() -> int:
+    room_id_range_size = ROOM_ID_MAX - ROOM_ID_MIN + 1
     for _ in range(10):
-        room_id = secrets.randbelow(ROOM_ID_MAX + 1)
+        room_id = ROOM_ID_MIN + secrets.randbelow(room_id_range_size)
         existing_game = await database.Game.find_by_room_id(room_id)
         if existing_game is None:
             return room_id
