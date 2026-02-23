@@ -324,6 +324,20 @@ class Character(BaseModel):
             )
             return [cls(**dict(row)) for row in rows]
 
+    @classmethod
+    async def delete_by_external_id_and_game_id(cls, external_id: str, game_id: int) -> bool:
+        async with _POOL.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                DELETE FROM characters
+                WHERE external_id = $1 AND game_id = $2
+                RETURNING id
+                """,
+                external_id,
+                game_id,
+            )
+            return row is not None
+
 
 class Map(BaseModel):
     id: int = 0
@@ -512,6 +526,20 @@ class Item(BaseModel):
             )
             return [cls(**dict(row)) for row in rows]
 
+    @classmethod
+    async def delete_by_external_id_and_game_id(cls, external_id: str, game_id: int) -> bool:
+        async with _POOL.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                DELETE FROM items
+                WHERE external_id = $1 AND game_id = $2
+                RETURNING id
+                """,
+                external_id,
+                game_id,
+            )
+            return row is not None
+
 
 class AudioFile(BaseModel):
     id: int = 0
@@ -573,6 +601,20 @@ class AudioFile(BaseModel):
             )
             return [cls(**dict(row)) for row in rows]
 
+    @classmethod
+    async def delete_by_external_id_and_game_id(cls, external_id: str, game_id: int) -> bool:
+        async with _POOL.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                DELETE FROM audio_files
+                WHERE external_id = $1 AND game_id = $2
+                RETURNING id
+                """,
+                external_id,
+                game_id,
+            )
+            return row is not None
+
 
 class VideoFile(BaseModel):
     id: int = 0
@@ -633,3 +675,17 @@ class VideoFile(BaseModel):
                 game_id,
             )
             return [cls(**dict(row)) for row in rows]
+
+    @classmethod
+    async def delete_by_external_id_and_game_id(cls, external_id: str, game_id: int) -> bool:
+        async with _POOL.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                DELETE FROM video_files
+                WHERE external_id = $1 AND game_id = $2
+                RETURNING id
+                """,
+                external_id,
+                game_id,
+            )
+            return row is not None

@@ -210,6 +210,12 @@ class MasterCabinetCreateVideoFileResponse(pydantic.BaseModel):
     duration_seconds: float
 
 
+class MasterCabinetDeleteResponse(pydantic.BaseModel):
+    status: str = "deleted"
+    external_id: str
+    game_external_id: str
+
+
 @app.post("/api/master-cabinet/game")
 async def create_game_from_master_cabinet_handler(
     payload: MasterCabinetCreateGameRequest,
@@ -412,6 +418,110 @@ async def create_master_cabinet_video_file_handler(
         name=video_file.name,
         url=video_file.url,
         duration_seconds=video_file.duration_seconds,
+    )
+
+
+@app.delete(
+    "/api/master-cabinet/game/{game_external_id}/character/{character_external_id}",
+    response_model=MasterCabinetDeleteResponse,
+)
+async def delete_master_cabinet_character_handler(
+    game_external_id: str,
+    character_external_id: str,
+    _: None = Depends(_verify_master_cabinet_secret),
+) -> MasterCabinetDeleteResponse:
+    game = await database.Game.find_by_external_id(game_external_id)
+    if game is None:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    deleted = await database.Character.delete_by_external_id_and_game_id(
+        external_id=character_external_id,
+        game_id=game.id,
+    )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Character not found")
+
+    return MasterCabinetDeleteResponse(
+        external_id=character_external_id,
+        game_external_id=game_external_id,
+    )
+
+
+@app.delete(
+    "/api/master-cabinet/game/{game_external_id}/item/{item_external_id}",
+    response_model=MasterCabinetDeleteResponse,
+)
+async def delete_master_cabinet_item_handler(
+    game_external_id: str,
+    item_external_id: str,
+    _: None = Depends(_verify_master_cabinet_secret),
+) -> MasterCabinetDeleteResponse:
+    game = await database.Game.find_by_external_id(game_external_id)
+    if game is None:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    deleted = await database.Item.delete_by_external_id_and_game_id(
+        external_id=item_external_id,
+        game_id=game.id,
+    )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    return MasterCabinetDeleteResponse(
+        external_id=item_external_id,
+        game_external_id=game_external_id,
+    )
+
+
+@app.delete(
+    "/api/master-cabinet/game/{game_external_id}/audio-file/{audio_external_id}",
+    response_model=MasterCabinetDeleteResponse,
+)
+async def delete_master_cabinet_audio_file_handler(
+    game_external_id: str,
+    audio_external_id: str,
+    _: None = Depends(_verify_master_cabinet_secret),
+) -> MasterCabinetDeleteResponse:
+    game = await database.Game.find_by_external_id(game_external_id)
+    if game is None:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    deleted = await database.AudioFile.delete_by_external_id_and_game_id(
+        external_id=audio_external_id,
+        game_id=game.id,
+    )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Audio file not found")
+
+    return MasterCabinetDeleteResponse(
+        external_id=audio_external_id,
+        game_external_id=game_external_id,
+    )
+
+
+@app.delete(
+    "/api/master-cabinet/game/{game_external_id}/video-file/{video_external_id}",
+    response_model=MasterCabinetDeleteResponse,
+)
+async def delete_master_cabinet_video_file_handler(
+    game_external_id: str,
+    video_external_id: str,
+    _: None = Depends(_verify_master_cabinet_secret),
+) -> MasterCabinetDeleteResponse:
+    game = await database.Game.find_by_external_id(game_external_id)
+    if game is None:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    deleted = await database.VideoFile.delete_by_external_id_and_game_id(
+        external_id=video_external_id,
+        game_id=game.id,
+    )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Video file not found")
+
+    return MasterCabinetDeleteResponse(
+        external_id=video_external_id,
+        game_external_id=game_external_id,
     )
 
 
