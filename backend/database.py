@@ -1,11 +1,10 @@
 import datetime
-import json
 import logging
 import uuid
-from typing import Annotated, Any, List, Optional
+from typing import List, Optional
 
 import asyncpg
-from pydantic import BaseModel, BeforeValidator, Field
+from pydantic import BaseModel, Field
 
 import settings
 
@@ -40,6 +39,30 @@ class Master(BaseModel):
                 id,
             )
             return cls(**dict(row)) if row else None
+
+    @classmethod
+    async def find_by_external_id(cls, external_id):
+        async with _POOL.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT * FROM masters where external_id = $1;
+                """,
+                external_id,
+            )
+            return cls(**dict(row)) if row else None
+
+    @classmethod
+    async def create(cls, external_id: str):
+        async with _POOL.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO masters (external_id)
+                VALUES ($1)
+                RETURNING id, external_id
+                """,
+                external_id,
+            )
+            return cls(**dict(row))
 
 
 class Game(BaseModel):
@@ -84,6 +107,49 @@ class Game(BaseModel):
                 master_join_link,
             )
             return cls(**dict(row)) if row else None
+
+    @classmethod
+    async def find_by_room_id(cls, room_id: int):
+        async with _POOL.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT * FROM games where room_id = $1;
+                """,
+                str(room_id),
+            )
+            return cls(**dict(row)) if row else None
+
+    @classmethod
+    async def create(
+        cls,
+        name: str,
+        master_id: int,
+        master_join_link: str,
+        master_avatar_url: str,
+        room_id: int,
+    ):
+        async with _POOL.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO games (
+                    name,
+                    external_id,
+                    master_id,
+                    master_join_link,
+                    master_avatar_url,
+                    room_id
+                )
+                VALUES ($1, $2, $3, $4, $5, $6)
+                RETURNING id, name, external_id, master_id, master_join_link, master_avatar_url, room_id
+                """,
+                name,
+                uuid.uuid4().hex,
+                master_id,
+                master_join_link,
+                master_avatar_url,
+                str(room_id),  # FIXME: в базе остался text
+            )
+            return cls(**dict(row))
 
 
 class FogEracePoint(BaseModel):
@@ -158,10 +224,10 @@ class Character(BaseModel):
     join_link: str
 
     avatar_url: str
-    race: str
+    race: str = "human"
 
     inventory: List = []
-    color: str
+    color: str = "#ff0000"
 
     x: float | None = None
     y: float | None = None
@@ -188,6 +254,42 @@ class Character(BaseModel):
                 raise NotImplementedError
 
         return self
+
+    @classmethod
+    async def create(
+        cls,
+        *,
+        name: str,
+        game_id: int,
+        join_link: str,
+        avatar_url: str,
+        race: str = "human",
+        color: str = "#ff0000",
+    ):
+        async with _POOL.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO characters (
+                    external_id,
+                    name,
+                    game_id,
+                    join_link,
+                    avatar_url,
+                    race,
+                    color
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                RETURNING *
+                """,
+                uuid.uuid4().hex,
+                name,
+                game_id,
+                join_link,
+                avatar_url,
+                race,
+                color,
+            )
+            return cls(**dict(row))
 
     @classmethod
     async def find_by_join_link(cls, join_link):
@@ -351,6 +453,36 @@ class Item(BaseModel):
         return self
 
     @classmethod
+    async def create(
+        cls,
+        *,
+        name: str,
+        game_id: int,
+        icon_url: str,
+    ):
+        async with _POOL.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO items (
+                    external_id,
+                    name,
+                    game_id,
+                    icon_url,
+                    map_id,
+                    x,
+                    y
+                )
+                VALUES ($1, $2, $3, $4, NULL, NULL, NULL)
+                RETURNING *
+                """,
+                uuid.uuid4().hex,
+                name,
+                game_id,
+                icon_url,
+            )
+            return cls(**dict(row))
+
+    @classmethod
     async def find_by_external_id(cls, external_id):
         async with _POOL.acquire() as conn:
             row = await conn.fetchrow(
@@ -387,7 +519,37 @@ class AudioFile(BaseModel):
     name: str
     game_id: int
     url: str
-    duration_seconds: float | None = None
+    duration_seconds: float
+
+    @classmethod
+    async def create(
+        cls,
+        *,
+        name: str,
+        game_id: int,
+        url: str,
+        duration_seconds: float,
+    ):
+        async with _POOL.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO audio_files (
+                    external_id,
+                    name,
+                    game_id,
+                    url,
+                    duration_seconds
+                )
+                VALUES ($1, $2, $3, $4, $5)
+                RETURNING *
+                """,
+                uuid.uuid4().hex,
+                name,
+                game_id,
+                url,
+                duration_seconds,
+            )
+            return cls(**dict(row))
 
     @classmethod
     async def find_by_external_id(cls, external_id):
@@ -418,7 +580,37 @@ class VideoFile(BaseModel):
     name: str
     game_id: int
     url: str
-    duration_seconds: float | None = None
+    duration_seconds: float
+
+    @classmethod
+    async def create(
+        cls,
+        *,
+        name: str,
+        game_id: int,
+        url: str,
+        duration_seconds: float,
+    ):
+        async with _POOL.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO video_files (
+                    external_id,
+                    name,
+                    game_id,
+                    url,
+                    duration_seconds
+                )
+                VALUES ($1, $2, $3, $4, $5)
+                RETURNING *
+                """,
+                uuid.uuid4().hex,
+                name,
+                game_id,
+                url,
+                duration_seconds,
+            )
+            return cls(**dict(row))
 
     @classmethod
     async def find_by_external_id(cls, external_id):

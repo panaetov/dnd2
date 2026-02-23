@@ -1,18 +1,23 @@
 import asyncio
 import json
 import logging
+import os
+import secrets
+import string
+import uuid
 from contextlib import asynccontextmanager
 from typing import Dict, List
 
 import pydantic
 from aiortc import RTCConfiguration, RTCIceServer
-from fastapi import FastAPI, WebSocket
+from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from janus_client import JanusSession, JanusVideoRoomPlugin
 
 import database
-from media import MediaPlayer
 import settings
+from media import MediaPlayer
+from s3_service import s3_service
 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,6 +26,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 logger.setLevel("INFO")
+
+MASTER_JOIN_LINK_LENGTH = 12
+MASTER_JOIN_LINK_ALPHABET = string.ascii_letters + string.digits
+ROOM_ID_MAX = (2**32) - 1
 
 
 @asynccontextmanager
@@ -54,6 +63,356 @@ class JoinResponse(pydantic.BaseModel):
     room_id: int
     user_id: str
     is_master: bool
+
+
+def _verify_master_cabinet_secret(
+    server_secret: str | None = Header(
+        default=None,
+        alias=settings.MASTER_CABINET_SECRET_HEADER,
+        description="Server-to-server secret key",
+    ),
+) -> None:
+    expected_secret = settings.MASTER_CABINET_SECRET
+    if not expected_secret:
+        logger.error("MASTER_CABINET_SECRET is not configured")
+        raise HTTPException(status_code=500, detail="Server auth is not configured")
+
+    if server_secret != expected_secret:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+async def _generate_master_join_link() -> str:
+    for _ in range(10):
+        link = "m-" + "".join(
+            secrets.choice(MASTER_JOIN_LINK_ALPHABET)
+            for _ in range(MASTER_JOIN_LINK_LENGTH)
+        )
+        existing_game = await database.Game.find_by_master_link(link)
+        if existing_game is None:
+            return link
+
+    raise HTTPException(
+        status_code=500, detail="Cannot generate unique master join link"
+    )
+
+
+async def _generate_room_id() -> int:
+    for _ in range(10):
+        room_id = secrets.randbelow(ROOM_ID_MAX + 1)
+        existing_game = await database.Game.find_by_room_id(room_id)
+        if existing_game is None:
+            return room_id
+
+    raise HTTPException(status_code=500, detail="Cannot generate unique room id")
+
+
+async def _generate_character_join_link() -> str:
+    for _ in range(10):
+        link = "".join(
+            secrets.choice(MASTER_JOIN_LINK_ALPHABET)
+            for _ in range(MASTER_JOIN_LINK_LENGTH)
+        )
+        existing_character = await database.Character.find_by_join_link(link)
+        if existing_character is None:
+            return link
+
+    raise HTTPException(
+        status_code=500, detail="Cannot generate unique character join link"
+    )
+
+
+class MasterCabinetCreateGameRequest(pydantic.BaseModel):
+    master_external_id: str
+    name: str
+    master_avatar_url: str = ""
+
+
+class MasterCabinetCreateGameResponse(pydantic.BaseModel):
+    external_id: str
+    name: str
+    room_id: int
+    master_join_link: str
+
+
+class MasterCabinetUploadFileResponse(pydantic.BaseModel):
+    key: str
+    url: str
+    filename: str
+    content_type: str | None = None
+    size: int
+
+
+class MasterCabinetCreateCharacterRequest(pydantic.BaseModel):
+    name: str
+    avatar_url: str = ""
+    race: str = "human"
+    color: str = "#ff0000"
+
+
+class MasterCabinetCreateCharacterResponse(pydantic.BaseModel):
+    external_id: str
+    game_external_id: str
+    name: str
+    join_link: str
+    avatar_url: str
+    race: str
+    color: str
+
+
+class MasterCabinetAttachMapRequest(pydantic.BaseModel):
+    url: str
+
+
+class MasterCabinetAttachMapResponse(pydantic.BaseModel):
+    url: str
+    map_external_id: str
+    game_external_id: str
+
+
+class MasterCabinetCreateItemRequest(pydantic.BaseModel):
+    name: str
+    icon_url: str
+
+
+class MasterCabinetCreateItemResponse(pydantic.BaseModel):
+    external_id: str
+    game_external_id: str
+    name: str
+    icon_url: str
+    map_id: int | None = None
+
+
+class MasterCabinetCreateAudioFileRequest(pydantic.BaseModel):
+    name: str
+    url: str
+    duration_seconds: float
+
+
+class MasterCabinetCreateAudioFileResponse(pydantic.BaseModel):
+    external_id: str
+    game_external_id: str
+    name: str
+    url: str
+    duration_seconds: float
+
+
+class MasterCabinetCreateVideoFileRequest(pydantic.BaseModel):
+    name: str
+    url: str
+    duration_seconds: float
+
+
+class MasterCabinetCreateVideoFileResponse(pydantic.BaseModel):
+    external_id: str
+    game_external_id: str
+    name: str
+    url: str
+    duration_seconds: float
+
+
+@app.post("/api/master-cabinet/game")
+async def create_game_from_master_cabinet_handler(
+    payload: MasterCabinetCreateGameRequest,
+    _: None = Depends(_verify_master_cabinet_secret),
+) -> MasterCabinetCreateGameResponse:
+    master = await database.Master.find_by_external_id(payload.master_external_id)
+    if master is None:
+        master = await database.Master.create(payload.master_external_id)
+
+    game = await database.Game.create(
+        name=payload.name,
+        master_id=master.id,
+        master_join_link=await _generate_master_join_link(),
+        master_avatar_url=payload.master_avatar_url or settings.MASTER_DEFAULT_AVATAR,
+        room_id=await _generate_room_id(),
+    )
+
+    return MasterCabinetCreateGameResponse(
+        external_id=game.external_id,
+        name=game.name,
+        room_id=game.room_id,
+        master_join_link=game.master_join_link,
+    )
+
+
+@app.post("/api/master-cabinet/upload", response_model=MasterCabinetUploadFileResponse)
+async def upload_master_cabinet_file_handler(
+    file: UploadFile = File(...),
+    _: None = Depends(_verify_master_cabinet_secret),
+) -> MasterCabinetUploadFileResponse:
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="File is empty")
+
+    extension = os.path.splitext(file.filename or "")[1]
+    key = f"uploads/{uuid.uuid4().hex}{extension}"
+    file_url = s3_service.upload_bytes(
+        content=file_bytes,
+        key=key,
+        content_type=file.content_type,
+        make_public=True,
+    )
+
+    return MasterCabinetUploadFileResponse(
+        key=key,
+        url=file_url,
+        filename=file.filename or "",
+        content_type=file.content_type,
+        size=len(file_bytes),
+    )
+
+
+@app.post(
+    "/api/master-cabinet/game/{game_external_id}/character",
+    response_model=MasterCabinetCreateCharacterResponse,
+)
+async def create_master_cabinet_character_handler(
+    game_external_id: str,
+    payload: MasterCabinetCreateCharacterRequest,
+    _: None = Depends(_verify_master_cabinet_secret),
+) -> MasterCabinetCreateCharacterResponse:
+    game = await database.Game.find_by_external_id(game_external_id)
+    if game is None:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    character = await database.Character.create(
+        name=payload.name,
+        game_id=game.id,
+        join_link=await _generate_character_join_link(),
+        avatar_url=payload.avatar_url,
+        race=payload.race,
+        color=payload.color,
+    )
+
+    return MasterCabinetCreateCharacterResponse(
+        external_id=character.external_id,
+        game_external_id=game_external_id,
+        name=character.name,
+        join_link=character.join_link,
+        avatar_url=character.avatar_url,
+        race=character.race,
+        color=character.color,
+    )
+
+
+@app.post(
+    "/api/master-cabinet/game/{game_external_id}/map",
+    response_model=MasterCabinetAttachMapResponse,
+)
+async def attach_master_cabinet_map_handler(
+    game_external_id: str,
+    payload: MasterCabinetAttachMapRequest,
+    _: None = Depends(_verify_master_cabinet_secret),
+) -> MasterCabinetAttachMapResponse:
+    game = await database.Game.find_by_external_id(game_external_id)
+    if game is None:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    gmap = await database.Map.find_by_game_id(game.id)
+    if gmap is None:
+        gmap = database.Map(
+            game_id=game.id,
+            url=payload.url,
+            x_center=50,
+            y_center=50,
+            zoom=1,
+        )
+    else:
+        gmap.url = payload.url
+
+    await gmap.save()
+
+    return MasterCabinetAttachMapResponse(
+        url=gmap.url,
+        map_external_id=gmap.external_id,
+        game_external_id=game_external_id,
+    )
+
+
+@app.post(
+    "/api/master-cabinet/game/{game_external_id}/item",
+    response_model=MasterCabinetCreateItemResponse,
+)
+async def create_master_cabinet_item_handler(
+    game_external_id: str,
+    payload: MasterCabinetCreateItemRequest,
+    _: None = Depends(_verify_master_cabinet_secret),
+) -> MasterCabinetCreateItemResponse:
+    game = await database.Game.find_by_external_id(game_external_id)
+    if game is None:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    item = await database.Item.create(
+        name=payload.name,
+        game_id=game.id,
+        icon_url=payload.icon_url,
+    )
+
+    return MasterCabinetCreateItemResponse(
+        external_id=item.external_id,
+        game_external_id=game_external_id,
+        name=item.name,
+        icon_url=item.icon_url,
+        map_id=item.map_id,
+    )
+
+
+@app.post(
+    "/api/master-cabinet/game/{game_external_id}/audio-file",
+    response_model=MasterCabinetCreateAudioFileResponse,
+)
+async def create_master_cabinet_audio_file_handler(
+    game_external_id: str,
+    payload: MasterCabinetCreateAudioFileRequest,
+    _: None = Depends(_verify_master_cabinet_secret),
+) -> MasterCabinetCreateAudioFileResponse:
+    game = await database.Game.find_by_external_id(game_external_id)
+    if game is None:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    audio_file = await database.AudioFile.create(
+        name=payload.name,
+        game_id=game.id,
+        url=payload.url,
+        duration_seconds=payload.duration_seconds,
+    )
+
+    return MasterCabinetCreateAudioFileResponse(
+        external_id=audio_file.external_id,
+        game_external_id=game_external_id,
+        name=audio_file.name,
+        url=audio_file.url,
+        duration_seconds=audio_file.duration_seconds,
+    )
+
+
+@app.post(
+    "/api/master-cabinet/game/{game_external_id}/video-file",
+    response_model=MasterCabinetCreateVideoFileResponse,
+)
+async def create_master_cabinet_video_file_handler(
+    game_external_id: str,
+    payload: MasterCabinetCreateVideoFileRequest,
+    _: None = Depends(_verify_master_cabinet_secret),
+) -> MasterCabinetCreateVideoFileResponse:
+    game = await database.Game.find_by_external_id(game_external_id)
+    if game is None:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    video_file = await database.VideoFile.create(
+        name=payload.name,
+        game_id=game.id,
+        url=payload.url,
+        duration_seconds=payload.duration_seconds,
+    )
+
+    return MasterCabinetCreateVideoFileResponse(
+        external_id=video_file.external_id,
+        game_external_id=game_external_id,
+        name=video_file.name,
+        url=video_file.url,
+        duration_seconds=video_file.duration_seconds,
+    )
 
 
 @app.get("/api/join/{link}")
@@ -103,7 +462,7 @@ class ItemFacade(pydantic.BaseModel):
 
     name: str
 
-    icon_url: str = ''
+    icon_url: str = ""
     x: float | None = None
     y: float | None = None
 

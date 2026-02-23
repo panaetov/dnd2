@@ -9,6 +9,10 @@ DATABASE_DSN = (
     f"{DATABASE_HOST}:{DATABASE_PORT}/{DATABASE_NAME}"
 )
 
+MASTER_DEFAULT_AVATAR = (
+    "https://storage.yandexcloud.net/dnd2/demo-game-1/master-avatar.jpg"
+)
+
 DB_CONFIG = {
     "host": DATABASE_HOST,
     "port": DATABASE_PORT,
@@ -25,6 +29,19 @@ TURN_SERVER_CREDENTIAL = os.environ.get(
 )
 
 STUN_SERVER_URL = os.environ.get("STUN_SERVER_URL", "stun:stun.l.google.com:19302")
+
+MASTER_CABINET_SECRET = os.environ.get("MASTER_CABINET_SECRET", "pizdezsecret")
+MASTER_CABINET_SECRET_HEADER = os.environ.get(
+    "MASTER_CABINET_SECRET_HEADER", "X-Server-Secret"
+)
+
+S3_ENDPOINT_URL = os.environ.get("S3_ENDPOINT_URL", "https://storage.yandexcloud.net")
+S3_REGION_NAME = os.environ.get("S3_REGION_NAME", "ru-central1")
+S3_BUCKET_NAME = os.environ.get("S3_BUCKET_NAME", "dnd2")
+S3_ACCESS_KEY_ID = os.environ.get("S3_ACCESS_KEY_ID", "YCAJEY0yZHpI1_WLoc92aUmEc")
+S3_SECRET_ACCESS_KEY = os.environ.get(
+    "S3_SECRET_ACCESS_KEY", "YCOWcVrxhqJaMFyDh0jMs96a-ZSkeNitNq23YQqY"
+)
 
 # Список TURN серверов
 TURN_SERVERS = [
