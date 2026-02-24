@@ -5,3 +5,4 @@ slixmpp
 aiortc==1.10.1
 janus-client==0.9.0
 boto3
+PyJWT

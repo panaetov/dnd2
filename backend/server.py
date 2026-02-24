@@ -6,12 +6,15 @@ import secrets
 import string
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List
 
 import pydantic
+import jwt
 from aiortc import RTCConfiguration, RTCIceServer
-from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, WebSocket
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from janus_client import JanusSession, JanusVideoRoomPlugin
 
 import database
@@ -66,20 +69,53 @@ class JoinResponse(pydantic.BaseModel):
     is_master: bool
 
 
-def _verify_master_cabinet_secret(
-    server_secret: str | None = Header(
-        default=None,
-        alias=settings.MASTER_CABINET_SECRET_HEADER,
-        description="Server-to-server secret key",
-    ),
-) -> None:
-    expected_secret = settings.MASTER_CABINET_SECRET
-    if not expected_secret:
-        logger.error("MASTER_CABINET_SECRET is not configured")
-        raise HTTPException(status_code=500, detail="Server auth is not configured")
+class MasterCabinetLoginRequest(pydantic.BaseModel):
+    login: str
+    password: str
 
-    if server_secret != expected_secret:
+
+class MasterCabinetLoginResponse(pydantic.BaseModel):
+    status: str = "ok"
+    master_external_id: str
+
+
+def _build_master_cabinet_token(master_external_id: str) -> str:
+    now = datetime.now(tz=timezone.utc)
+    payload = {
+        "master_external_id": master_external_id,
+        "iat": now,
+        "exp": now + timedelta(seconds=settings.MASTER_CABINET_JWT_EXPIRE_SECONDS),
+    }
+    return jwt.encode(
+        payload,
+        settings.MASTER_CABINET_JWT_SECRET,
+        algorithm=settings.MASTER_CABINET_JWT_ALGORITHM,
+    )
+
+
+async def _require_master_cabinet_auth(request: Request) -> database.Master:
+    token = request.cookies.get(settings.MASTER_CABINET_AUTH_COOKIE_NAME)
+    if not token:
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+    try:
+        payload = jwt.decode(
+            token,
+            settings.MASTER_CABINET_JWT_SECRET,
+            algorithms=[settings.MASTER_CABINET_JWT_ALGORITHM],
+        )
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    master_external_id = payload.get("master_external_id")
+    if not master_external_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    master = await database.Master.find_by_external_id(master_external_id)
+    if master is None:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    return master
 
 
 async def _generate_master_join_link() -> str:
@@ -124,9 +160,7 @@ async def _generate_character_join_link() -> str:
 
 
 class MasterCabinetCreateGameRequest(pydantic.BaseModel):
-    master_external_id: str
     name: str
-    master_avatar_url: str = ""
 
 
 class MasterCabinetCreateGameResponse(pydantic.BaseModel):
@@ -134,6 +168,23 @@ class MasterCabinetCreateGameResponse(pydantic.BaseModel):
     name: str
     room_id: int
     master_join_link: str
+
+
+class MasterCabinetGameListItem(pydantic.BaseModel):
+    external_id: str
+    name: str
+    room_id: int
+    master_join_link: str
+    master_avatar_url: str
+
+
+class MasterCabinetUpdateGameMasterAvatarRequest(pydantic.BaseModel):
+    master_avatar_url: str
+
+
+class MasterCabinetUpdateGameMasterAvatarResponse(pydantic.BaseModel):
+    game_external_id: str
+    master_avatar_url: str
 
 
 class MasterCabinetUploadFileResponse(pydantic.BaseModel):
@@ -152,6 +203,23 @@ class MasterCabinetCreateCharacterRequest(pydantic.BaseModel):
 
 
 class MasterCabinetCreateCharacterResponse(pydantic.BaseModel):
+    external_id: str
+    game_external_id: str
+    name: str
+    join_link: str
+    avatar_url: str
+    race: str
+    color: str
+
+
+class MasterCabinetUpdateCharacterRequest(pydantic.BaseModel):
+    name: str | None = None
+    avatar_url: str | None = None
+    race: str | None = None
+    color: str | None = None
+
+
+class MasterCabinetUpdateCharacterResponse(pydantic.BaseModel):
     external_id: str
     game_external_id: str
     name: str
@@ -184,6 +252,19 @@ class MasterCabinetCreateItemResponse(pydantic.BaseModel):
     map_id: int | None = None
 
 
+class MasterCabinetUpdateItemRequest(pydantic.BaseModel):
+    name: str | None = None
+    icon_url: str | None = None
+
+
+class MasterCabinetUpdateItemResponse(pydantic.BaseModel):
+    external_id: str
+    game_external_id: str
+    name: str
+    icon_url: str
+    map_id: int | None = None
+
+
 class MasterCabinetCreateAudioFileRequest(pydantic.BaseModel):
     name: str
     url: str
@@ -191,6 +272,20 @@ class MasterCabinetCreateAudioFileRequest(pydantic.BaseModel):
 
 
 class MasterCabinetCreateAudioFileResponse(pydantic.BaseModel):
+    external_id: str
+    game_external_id: str
+    name: str
+    url: str
+    duration_seconds: float
+
+
+class MasterCabinetUpdateAudioFileRequest(pydantic.BaseModel):
+    name: str | None = None
+    url: str | None = None
+    duration_seconds: float | None = None
+
+
+class MasterCabinetUpdateAudioFileResponse(pydantic.BaseModel):
     external_id: str
     game_external_id: str
     name: str
@@ -212,26 +307,61 @@ class MasterCabinetCreateVideoFileResponse(pydantic.BaseModel):
     duration_seconds: float
 
 
+class MasterCabinetUpdateVideoFileRequest(pydantic.BaseModel):
+    name: str | None = None
+    url: str | None = None
+    duration_seconds: float | None = None
+
+
+class MasterCabinetUpdateVideoFileResponse(pydantic.BaseModel):
+    external_id: str
+    game_external_id: str
+    name: str
+    url: str
+    duration_seconds: float
+
+
 class MasterCabinetDeleteResponse(pydantic.BaseModel):
     status: str = "deleted"
     external_id: str
     game_external_id: str
 
 
+@app.post("/api/master-cabinet/auth/login", response_model=MasterCabinetLoginResponse)
+async def master_cabinet_login_handler(
+    payload: MasterCabinetLoginRequest,
+) -> JSONResponse:
+    master = await database.Master.find_by_login(payload.login)
+    if master is None or master.password != payload.password:
+        raise HTTPException(status_code=401, detail="Invalid login or password")
+
+    token = _build_master_cabinet_token(master.external_id)
+    response = JSONResponse(
+        content=MasterCabinetLoginResponse(
+            master_external_id=master.external_id,
+        ).model_dump()
+    )
+    response.set_cookie(
+        key=settings.MASTER_CABINET_AUTH_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=settings.MASTER_CABINET_AUTH_COOKIE_SECURE,
+        samesite=settings.MASTER_CABINET_AUTH_COOKIE_SAMESITE,
+        max_age=settings.MASTER_CABINET_JWT_EXPIRE_SECONDS,
+    )
+    return response
+
+
 @app.post("/api/master-cabinet/game")
 async def create_game_from_master_cabinet_handler(
     payload: MasterCabinetCreateGameRequest,
-    _: None = Depends(_verify_master_cabinet_secret),
+    master: database.Master = Depends(_require_master_cabinet_auth),
 ) -> MasterCabinetCreateGameResponse:
-    master = await database.Master.find_by_external_id(payload.master_external_id)
-    if master is None:
-        master = await database.Master.create(payload.master_external_id)
-
     game = await database.Game.create(
         name=payload.name,
         master_id=master.id,
         master_join_link=await _generate_master_join_link(),
-        master_avatar_url=payload.master_avatar_url or settings.MASTER_DEFAULT_AVATAR,
+        master_avatar_url=settings.MASTER_DEFAULT_AVATAR,
         room_id=await _generate_room_id(),
     )
 
@@ -243,10 +373,50 @@ async def create_game_from_master_cabinet_handler(
     )
 
 
+@app.get("/api/master-cabinet/games", response_model=List[MasterCabinetGameListItem])
+async def list_master_cabinet_games_handler(
+    master: database.Master = Depends(_require_master_cabinet_auth),
+) -> List[MasterCabinetGameListItem]:
+    games = await database.Game.find_by_master_id(master.id)
+    return [
+        MasterCabinetGameListItem(
+            external_id=game.external_id,
+            name=game.name,
+            room_id=game.room_id,
+            master_join_link=game.master_join_link,
+            master_avatar_url=game.master_avatar_url,
+        )
+        for game in games
+    ]
+
+
+@app.put(
+    "/api/master-cabinet/game/{game_external_id}/master-avatar",
+    response_model=MasterCabinetUpdateGameMasterAvatarResponse,
+)
+async def update_master_cabinet_game_master_avatar_handler(
+    game_external_id: str,
+    payload: MasterCabinetUpdateGameMasterAvatarRequest,
+    master: database.Master = Depends(_require_master_cabinet_auth),
+) -> MasterCabinetUpdateGameMasterAvatarResponse:
+    game = await database.Game.update_master_avatar_url(
+        external_id=game_external_id,
+        master_id=master.id,
+        master_avatar_url=payload.master_avatar_url,
+    )
+    if game is None:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    return MasterCabinetUpdateGameMasterAvatarResponse(
+        game_external_id=game.external_id,
+        master_avatar_url=game.master_avatar_url,
+    )
+
+
 @app.post("/api/master-cabinet/upload", response_model=MasterCabinetUploadFileResponse)
 async def upload_master_cabinet_file_handler(
     file: UploadFile = File(...),
-    _: None = Depends(_verify_master_cabinet_secret),
+    _: database.Master = Depends(_require_master_cabinet_auth),
 ) -> MasterCabinetUploadFileResponse:
     file_bytes = await file.read()
     if not file_bytes:
@@ -277,7 +447,7 @@ async def upload_master_cabinet_file_handler(
 async def create_master_cabinet_character_handler(
     game_external_id: str,
     payload: MasterCabinetCreateCharacterRequest,
-    _: None = Depends(_verify_master_cabinet_secret),
+    _: database.Master = Depends(_require_master_cabinet_auth),
 ) -> MasterCabinetCreateCharacterResponse:
     game = await database.Game.find_by_external_id(game_external_id)
     if game is None:
@@ -303,6 +473,42 @@ async def create_master_cabinet_character_handler(
     )
 
 
+@app.put(
+    "/api/master-cabinet/game/{game_external_id}/character/{character_external_id}",
+    response_model=MasterCabinetUpdateCharacterResponse,
+)
+async def update_master_cabinet_character_handler(
+    game_external_id: str,
+    character_external_id: str,
+    payload: MasterCabinetUpdateCharacterRequest,
+    _: database.Master = Depends(_require_master_cabinet_auth),
+) -> MasterCabinetUpdateCharacterResponse:
+    game = await database.Game.find_by_external_id(game_external_id)
+    if game is None:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    character = await database.Character.update_by_external_id_and_game_id(
+        external_id=character_external_id,
+        game_id=game.id,
+        name=payload.name,
+        avatar_url=payload.avatar_url,
+        race=payload.race,
+        color=payload.color,
+    )
+    if character is None:
+        raise HTTPException(status_code=404, detail="Character not found")
+
+    return MasterCabinetUpdateCharacterResponse(
+        external_id=character.external_id,
+        game_external_id=game_external_id,
+        name=character.name,
+        join_link=character.join_link,
+        avatar_url=character.avatar_url,
+        race=character.race,
+        color=character.color,
+    )
+
+
 @app.post(
     "/api/master-cabinet/game/{game_external_id}/map",
     response_model=MasterCabinetAttachMapResponse,
@@ -310,7 +516,7 @@ async def create_master_cabinet_character_handler(
 async def attach_master_cabinet_map_handler(
     game_external_id: str,
     payload: MasterCabinetAttachMapRequest,
-    _: None = Depends(_verify_master_cabinet_secret),
+    _: database.Master = Depends(_require_master_cabinet_auth),
 ) -> MasterCabinetAttachMapResponse:
     game = await database.Game.find_by_external_id(game_external_id)
     if game is None:
@@ -344,7 +550,7 @@ async def attach_master_cabinet_map_handler(
 async def create_master_cabinet_item_handler(
     game_external_id: str,
     payload: MasterCabinetCreateItemRequest,
-    _: None = Depends(_verify_master_cabinet_secret),
+    _: database.Master = Depends(_require_master_cabinet_auth),
 ) -> MasterCabinetCreateItemResponse:
     game = await database.Game.find_by_external_id(game_external_id)
     if game is None:
@@ -365,6 +571,38 @@ async def create_master_cabinet_item_handler(
     )
 
 
+@app.put(
+    "/api/master-cabinet/game/{game_external_id}/item/{item_external_id}",
+    response_model=MasterCabinetUpdateItemResponse,
+)
+async def update_master_cabinet_item_handler(
+    game_external_id: str,
+    item_external_id: str,
+    payload: MasterCabinetUpdateItemRequest,
+    _: database.Master = Depends(_require_master_cabinet_auth),
+) -> MasterCabinetUpdateItemResponse:
+    game = await database.Game.find_by_external_id(game_external_id)
+    if game is None:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    item = await database.Item.update_by_external_id_and_game_id(
+        external_id=item_external_id,
+        game_id=game.id,
+        name=payload.name,
+        icon_url=payload.icon_url,
+    )
+    if item is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    return MasterCabinetUpdateItemResponse(
+        external_id=item.external_id,
+        game_external_id=game_external_id,
+        name=item.name,
+        icon_url=item.icon_url,
+        map_id=item.map_id,
+    )
+
+
 @app.post(
     "/api/master-cabinet/game/{game_external_id}/audio-file",
     response_model=MasterCabinetCreateAudioFileResponse,
@@ -372,7 +610,7 @@ async def create_master_cabinet_item_handler(
 async def create_master_cabinet_audio_file_handler(
     game_external_id: str,
     payload: MasterCabinetCreateAudioFileRequest,
-    _: None = Depends(_verify_master_cabinet_secret),
+    _: database.Master = Depends(_require_master_cabinet_auth),
 ) -> MasterCabinetCreateAudioFileResponse:
     game = await database.Game.find_by_external_id(game_external_id)
     if game is None:
@@ -394,6 +632,39 @@ async def create_master_cabinet_audio_file_handler(
     )
 
 
+@app.put(
+    "/api/master-cabinet/game/{game_external_id}/audio-file/{audio_external_id}",
+    response_model=MasterCabinetUpdateAudioFileResponse,
+)
+async def update_master_cabinet_audio_file_handler(
+    game_external_id: str,
+    audio_external_id: str,
+    payload: MasterCabinetUpdateAudioFileRequest,
+    _: database.Master = Depends(_require_master_cabinet_auth),
+) -> MasterCabinetUpdateAudioFileResponse:
+    game = await database.Game.find_by_external_id(game_external_id)
+    if game is None:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    audio_file = await database.AudioFile.update_by_external_id_and_game_id(
+        external_id=audio_external_id,
+        game_id=game.id,
+        name=payload.name,
+        url=payload.url,
+        duration_seconds=payload.duration_seconds,
+    )
+    if audio_file is None:
+        raise HTTPException(status_code=404, detail="Audio file not found")
+
+    return MasterCabinetUpdateAudioFileResponse(
+        external_id=audio_file.external_id,
+        game_external_id=game_external_id,
+        name=audio_file.name,
+        url=audio_file.url,
+        duration_seconds=audio_file.duration_seconds,
+    )
+
+
 @app.post(
     "/api/master-cabinet/game/{game_external_id}/video-file",
     response_model=MasterCabinetCreateVideoFileResponse,
@@ -401,7 +672,7 @@ async def create_master_cabinet_audio_file_handler(
 async def create_master_cabinet_video_file_handler(
     game_external_id: str,
     payload: MasterCabinetCreateVideoFileRequest,
-    _: None = Depends(_verify_master_cabinet_secret),
+    _: database.Master = Depends(_require_master_cabinet_auth),
 ) -> MasterCabinetCreateVideoFileResponse:
     game = await database.Game.find_by_external_id(game_external_id)
     if game is None:
@@ -423,6 +694,39 @@ async def create_master_cabinet_video_file_handler(
     )
 
 
+@app.put(
+    "/api/master-cabinet/game/{game_external_id}/video-file/{video_external_id}",
+    response_model=MasterCabinetUpdateVideoFileResponse,
+)
+async def update_master_cabinet_video_file_handler(
+    game_external_id: str,
+    video_external_id: str,
+    payload: MasterCabinetUpdateVideoFileRequest,
+    _: database.Master = Depends(_require_master_cabinet_auth),
+) -> MasterCabinetUpdateVideoFileResponse:
+    game = await database.Game.find_by_external_id(game_external_id)
+    if game is None:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    video_file = await database.VideoFile.update_by_external_id_and_game_id(
+        external_id=video_external_id,
+        game_id=game.id,
+        name=payload.name,
+        url=payload.url,
+        duration_seconds=payload.duration_seconds,
+    )
+    if video_file is None:
+        raise HTTPException(status_code=404, detail="Video file not found")
+
+    return MasterCabinetUpdateVideoFileResponse(
+        external_id=video_file.external_id,
+        game_external_id=game_external_id,
+        name=video_file.name,
+        url=video_file.url,
+        duration_seconds=video_file.duration_seconds,
+    )
+
+
 @app.delete(
     "/api/master-cabinet/game/{game_external_id}/character/{character_external_id}",
     response_model=MasterCabinetDeleteResponse,
@@ -430,7 +734,7 @@ async def create_master_cabinet_video_file_handler(
 async def delete_master_cabinet_character_handler(
     game_external_id: str,
     character_external_id: str,
-    _: None = Depends(_verify_master_cabinet_secret),
+    _: database.Master = Depends(_require_master_cabinet_auth),
 ) -> MasterCabinetDeleteResponse:
     game = await database.Game.find_by_external_id(game_external_id)
     if game is None:
@@ -456,7 +760,7 @@ async def delete_master_cabinet_character_handler(
 async def delete_master_cabinet_item_handler(
     game_external_id: str,
     item_external_id: str,
-    _: None = Depends(_verify_master_cabinet_secret),
+    _: database.Master = Depends(_require_master_cabinet_auth),
 ) -> MasterCabinetDeleteResponse:
     game = await database.Game.find_by_external_id(game_external_id)
     if game is None:
@@ -482,7 +786,7 @@ async def delete_master_cabinet_item_handler(
 async def delete_master_cabinet_audio_file_handler(
     game_external_id: str,
     audio_external_id: str,
-    _: None = Depends(_verify_master_cabinet_secret),
+    _: database.Master = Depends(_require_master_cabinet_auth),
 ) -> MasterCabinetDeleteResponse:
     game = await database.Game.find_by_external_id(game_external_id)
     if game is None:
@@ -508,7 +812,7 @@ async def delete_master_cabinet_audio_file_handler(
 async def delete_master_cabinet_video_file_handler(
     game_external_id: str,
     video_external_id: str,
-    _: None = Depends(_verify_master_cabinet_secret),
+    _: database.Master = Depends(_require_master_cabinet_auth),
 ) -> MasterCabinetDeleteResponse:
     game = await database.Game.find_by_external_id(game_external_id)
     if game is None:

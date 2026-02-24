@@ -3,8 +3,16 @@ CREATE TABLE IF NOT EXISTS masters (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
 
-    external_id TEXT UNIQUE NOT NULL
+    external_id TEXT UNIQUE NOT NULL,
+    login TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL
 );
+
+ALTER TABLE masters
+    ADD COLUMN IF NOT EXISTS login TEXT;
+
+ALTER TABLE masters
+    ADD COLUMN IF NOT EXISTS password TEXT;
 
 
 
@@ -131,7 +139,7 @@ insert into video_files (external_id, name, game_id, url, duration_seconds) valu
 ('video-4', '4', 1, 'https://storage.yandexcloud.net/dnd2/video/4.mp4', 10);
 
 
-insert into masters (external_id) values ('alexey');
+insert into masters (external_id, login, password) values ('alexey', 'alexey', 'alexey');
 
 insert into games (external_id, name, master_id, master_join_link) values ('123', 'Game #1', 1, 'qwe');
 

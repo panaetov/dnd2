@@ -30,9 +30,21 @@ TURN_SERVER_CREDENTIAL = os.environ.get(
 
 STUN_SERVER_URL = os.environ.get("STUN_SERVER_URL", "stun:stun.l.google.com:19302")
 
-MASTER_CABINET_SECRET = os.environ.get("MASTER_CABINET_SECRET", "pizdezsecret")
-MASTER_CABINET_SECRET_HEADER = os.environ.get(
-    "MASTER_CABINET_SECRET_HEADER", "X-Server-Secret"
+MASTER_CABINET_JWT_SECRET = os.environ.get(
+    "MASTER_CABINET_JWT_SECRET", "change-this-master-cabinet-jwt-secret"
+)
+MASTER_CABINET_JWT_ALGORITHM = os.environ.get("MASTER_CABINET_JWT_ALGORITHM", "HS256")
+MASTER_CABINET_JWT_EXPIRE_SECONDS = int(
+    os.environ.get("MASTER_CABINET_JWT_EXPIRE_SECONDS", "604800")
+)
+MASTER_CABINET_AUTH_COOKIE_NAME = os.environ.get(
+    "MASTER_CABINET_AUTH_COOKIE_NAME", "master_cabinet_token"
+)
+MASTER_CABINET_AUTH_COOKIE_SECURE = (
+    os.environ.get("MASTER_CABINET_AUTH_COOKIE_SECURE", "false").lower() == "true"
+)
+MASTER_CABINET_AUTH_COOKIE_SAMESITE = os.environ.get(
+    "MASTER_CABINET_AUTH_COOKIE_SAMESITE", "lax"
 )
 
 S3_ENDPOINT_URL = os.environ.get("S3_ENDPOINT_URL", "https://storage.yandexcloud.net")

@@ -28,6 +28,8 @@ async def close_db():
 class Master(BaseModel):
     id: int = 0
     external_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+    login: str = ""
+    password: str = ""
 
     @classmethod
     async def find_by_id(cls, id):
@@ -52,15 +54,28 @@ class Master(BaseModel):
             return cls(**dict(row)) if row else None
 
     @classmethod
-    async def create(cls, external_id: str):
+    async def find_by_login(cls, login: str):
         async with _POOL.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                INSERT INTO masters (external_id)
-                VALUES ($1)
-                RETURNING id, external_id
+                SELECT * FROM masters where login = $1;
+                """,
+                login,
+            )
+            return cls(**dict(row)) if row else None
+
+    @classmethod
+    async def create(cls, external_id: str, login: str, password: str):
+        async with _POOL.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO masters (external_id, login, password)
+                VALUES ($1, $2, $3)
+                RETURNING *
                 """,
                 external_id,
+                login,
+                password,
             )
             return cls(**dict(row))
 
@@ -120,6 +135,19 @@ class Game(BaseModel):
             return cls(**dict(row)) if row else None
 
     @classmethod
+    async def find_by_master_id(cls, master_id: int):
+        async with _POOL.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT * FROM games
+                WHERE master_id = $1
+                ORDER BY id DESC
+                """,
+                master_id,
+            )
+            return [cls(**dict(row)) for row in rows]
+
+    @classmethod
     async def create(
         cls,
         name: str,
@@ -150,6 +178,24 @@ class Game(BaseModel):
                 str(room_id),  # FIXME: в базе остался text
             )
             return cls(**dict(row))
+
+    @classmethod
+    async def update_master_avatar_url(
+        cls, external_id: str, master_id: int, master_avatar_url: str
+    ):
+        async with _POOL.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                UPDATE games
+                SET master_avatar_url = $1
+                WHERE external_id = $2 AND master_id = $3
+                RETURNING id, name, external_id, master_id, master_join_link, master_avatar_url, room_id
+                """,
+                master_avatar_url,
+                external_id,
+                master_id,
+            )
+            return cls(**dict(row)) if row else None
 
 
 class FogEracePoint(BaseModel):
@@ -323,6 +369,38 @@ class Character(BaseModel):
                 game_id,
             )
             return [cls(**dict(row)) for row in rows]
+
+    @classmethod
+    async def update_by_external_id_and_game_id(
+        cls,
+        *,
+        external_id: str,
+        game_id: int,
+        name: str | None = None,
+        avatar_url: str | None = None,
+        race: str | None = None,
+        color: str | None = None,
+    ):
+        async with _POOL.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                UPDATE characters
+                SET
+                    name = COALESCE($1, name),
+                    avatar_url = COALESCE($2, avatar_url),
+                    race = COALESCE($3, race),
+                    color = COALESCE($4, color)
+                WHERE external_id = $5 AND game_id = $6
+                RETURNING *
+                """,
+                name,
+                avatar_url,
+                race,
+                color,
+                external_id,
+                game_id,
+            )
+            return cls(**dict(row)) if row else None
 
     @classmethod
     async def delete_by_external_id_and_game_id(cls, external_id: str, game_id: int) -> bool:
@@ -527,6 +605,32 @@ class Item(BaseModel):
             return [cls(**dict(row)) for row in rows]
 
     @classmethod
+    async def update_by_external_id_and_game_id(
+        cls,
+        *,
+        external_id: str,
+        game_id: int,
+        name: str | None = None,
+        icon_url: str | None = None,
+    ):
+        async with _POOL.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                UPDATE items
+                SET
+                    name = COALESCE($1, name),
+                    icon_url = COALESCE($2, icon_url)
+                WHERE external_id = $3 AND game_id = $4
+                RETURNING *
+                """,
+                name,
+                icon_url,
+                external_id,
+                game_id,
+            )
+            return cls(**dict(row)) if row else None
+
+    @classmethod
     async def delete_by_external_id_and_game_id(cls, external_id: str, game_id: int) -> bool:
         async with _POOL.acquire() as conn:
             row = await conn.fetchrow(
@@ -602,6 +706,35 @@ class AudioFile(BaseModel):
             return [cls(**dict(row)) for row in rows]
 
     @classmethod
+    async def update_by_external_id_and_game_id(
+        cls,
+        *,
+        external_id: str,
+        game_id: int,
+        name: str | None = None,
+        url: str | None = None,
+        duration_seconds: float | None = None,
+    ):
+        async with _POOL.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                UPDATE audio_files
+                SET
+                    name = COALESCE($1, name),
+                    url = COALESCE($2, url),
+                    duration_seconds = COALESCE($3, duration_seconds)
+                WHERE external_id = $4 AND game_id = $5
+                RETURNING *
+                """,
+                name,
+                url,
+                duration_seconds,
+                external_id,
+                game_id,
+            )
+            return cls(**dict(row)) if row else None
+
+    @classmethod
     async def delete_by_external_id_and_game_id(cls, external_id: str, game_id: int) -> bool:
         async with _POOL.acquire() as conn:
             row = await conn.fetchrow(
@@ -675,6 +808,35 @@ class VideoFile(BaseModel):
                 game_id,
             )
             return [cls(**dict(row)) for row in rows]
+
+    @classmethod
+    async def update_by_external_id_and_game_id(
+        cls,
+        *,
+        external_id: str,
+        game_id: int,
+        name: str | None = None,
+        url: str | None = None,
+        duration_seconds: float | None = None,
+    ):
+        async with _POOL.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                UPDATE video_files
+                SET
+                    name = COALESCE($1, name),
+                    url = COALESCE($2, url),
+                    duration_seconds = COALESCE($3, duration_seconds)
+                WHERE external_id = $4 AND game_id = $5
+                RETURNING *
+                """,
+                name,
+                url,
+                duration_seconds,
+                external_id,
+                game_id,
+            )
+            return cls(**dict(row)) if row else None
 
     @classmethod
     async def delete_by_external_id_and_game_id(cls, external_id: str, game_id: int) -> bool:
