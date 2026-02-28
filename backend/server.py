@@ -79,6 +79,15 @@ class MasterCabinetLoginResponse(pydantic.BaseModel):
     master_external_id: str
 
 
+class MasterCabinetMeResponse(pydantic.BaseModel):
+    master_external_id: str
+    name: str
+
+
+class MasterCabinetLogoutResponse(pydantic.BaseModel):
+    status: str = "ok"
+
+
 def _build_master_cabinet_token(master_external_id: str) -> str:
     now = datetime.now(tz=timezone.utc)
     payload = {
@@ -349,6 +358,25 @@ async def master_cabinet_login_handler(
         samesite=settings.MASTER_CABINET_AUTH_COOKIE_SAMESITE,
         max_age=settings.MASTER_CABINET_JWT_EXPIRE_SECONDS,
     )
+    return response
+
+
+@app.get("/api/master-cabinet/auth/me", response_model=MasterCabinetMeResponse)
+async def master_cabinet_me_handler(
+    master: database.Master = Depends(_require_master_cabinet_auth),
+) -> MasterCabinetMeResponse:
+    return MasterCabinetMeResponse(
+        master_external_id=master.external_id,
+        name=master.login,
+    )
+
+
+@app.post(
+    "/api/master-cabinet/auth/logout", response_model=MasterCabinetLogoutResponse
+)
+async def master_cabinet_logout_handler() -> JSONResponse:
+    response = JSONResponse(content=MasterCabinetLogoutResponse().model_dump())
+    response.delete_cookie(key=settings.MASTER_CABINET_AUTH_COOKIE_NAME)
     return response
 
 
