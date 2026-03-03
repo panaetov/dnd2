@@ -7,7 +7,7 @@ import string
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List
+from typing import Dict, List, Literal
 
 import pydantic
 import jwt
@@ -34,6 +34,9 @@ MASTER_JOIN_LINK_LENGTH = 12
 MASTER_JOIN_LINK_ALPHABET = string.ascii_letters + string.digits
 ROOM_ID_MIN = 1000
 ROOM_ID_MAX = 1099
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}
+VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".avi", ".mkv", ".m4v"}
+AUDIO_EXTENSIONS = {".mp3", ".wav", ".ogg", ".aac", ".m4a", ".flac"}
 
 
 @asynccontextmanager
@@ -187,6 +190,57 @@ class MasterCabinetGameListItem(pydantic.BaseModel):
     master_avatar_url: str
 
 
+class MasterCabinetGameMap(pydantic.BaseModel):
+    external_id: str
+    url: str
+    x_center: float
+    y_center: float
+    zoom: float
+
+
+class MasterCabinetGameCharacter(pydantic.BaseModel):
+    external_id: str
+    name: str
+    join_link: str
+    avatar_url: str
+    race: str
+    color: str
+
+
+class MasterCabinetGameItem(pydantic.BaseModel):
+    external_id: str
+    name: str
+    icon_url: str
+    map_id: int | None = None
+
+
+class MasterCabinetGameAudioFile(pydantic.BaseModel):
+    external_id: str
+    name: str
+    url: str
+    duration_seconds: float
+
+
+class MasterCabinetGameVideoFile(pydantic.BaseModel):
+    external_id: str
+    name: str
+    url: str
+    duration_seconds: float
+
+
+class MasterCabinetGameDetailsResponse(pydantic.BaseModel):
+    external_id: str
+    name: str
+    room_id: int
+    master_join_link: str
+    master_avatar_url: str
+    map: MasterCabinetGameMap | None = None
+    characters: List[MasterCabinetGameCharacter]
+    items: List[MasterCabinetGameItem]
+    audio_files: List[MasterCabinetGameAudioFile]
+    video_files: List[MasterCabinetGameVideoFile]
+
+
 class MasterCabinetUpdateGameMasterAvatarRequest(pydantic.BaseModel):
     master_avatar_url: str
 
@@ -336,6 +390,54 @@ class MasterCabinetDeleteResponse(pydantic.BaseModel):
     game_external_id: str
 
 
+class MasterCabinetAssetItem(pydantic.BaseModel):
+    key: str
+    url: str
+    category: Literal["images", "videos", "audios", "other"]
+    extension: str
+    size: int
+    last_modified: str | None = None
+
+
+class MasterCabinetAssetsResponse(pydantic.BaseModel):
+    category: Literal["images", "videos", "audios", "all"]
+    items: List[MasterCabinetAssetItem]
+
+
+def _detect_asset_category_by_extension(extension: str) -> str:
+    ext = extension.lower()
+    if ext in IMAGE_EXTENSIONS:
+        return "images"
+    if ext in VIDEO_EXTENSIONS:
+        return "videos"
+    if ext in AUDIO_EXTENSIONS:
+        return "audios"
+    return "other"
+
+
+def _master_assets_bucket_name(master: database.Master) -> str:
+    raw_name = f"{settings.S3_BUCKET_NAME}-{master.external_id}".lower()
+    normalized_chars = []
+    for ch in raw_name:
+        if ch.isalnum() or ch == "-":
+            normalized_chars.append(ch)
+        else:
+            normalized_chars.append("-")
+
+    bucket_name = "".join(normalized_chars).strip("-")
+    while "--" in bucket_name:
+        bucket_name = bucket_name.replace("--", "-")
+
+    if len(bucket_name) < 3:
+        bucket_name = (bucket_name + "-assets")[:63]
+    if len(bucket_name) > 63:
+        bucket_name = bucket_name[:63].rstrip("-")
+    if len(bucket_name) < 3:
+        bucket_name = "dnd-assets"
+
+    return bucket_name
+
+
 @app.post("/api/master-cabinet/auth/login", response_model=MasterCabinetLoginResponse)
 async def master_cabinet_login_handler(
     payload: MasterCabinetLoginRequest,
@@ -380,6 +482,43 @@ async def master_cabinet_logout_handler() -> JSONResponse:
     return response
 
 
+@app.get(
+    "/api/master-cabinet/assets/{category}",
+    response_model=MasterCabinetAssetsResponse,
+)
+async def list_master_cabinet_assets_handler(
+    category: Literal["images", "videos", "audios", "all"],
+    master: database.Master = Depends(_require_master_cabinet_auth),
+) -> MasterCabinetAssetsResponse:
+    bucket_name = _master_assets_bucket_name(master)
+    s3_service.ensure_bucket_exists(bucket_name)
+    objects = s3_service.list_objects(bucket_name=bucket_name)
+    result_items = []
+
+    for obj in objects:
+        key = obj["key"]
+        extension = os.path.splitext(key)[1].lower()
+        asset_category = _detect_asset_category_by_extension(extension)
+        if category != "all" and asset_category != category:
+            continue
+
+        result_items.append(
+            MasterCabinetAssetItem(
+                key=key,
+                url=s3_service.build_public_url(key, bucket_name=bucket_name),
+                category=asset_category,
+                extension=extension,
+                size=obj["size"],
+                last_modified=obj.get("last_modified"),
+            )
+        )
+
+    return MasterCabinetAssetsResponse(
+        category=category,
+        items=result_items,
+    )
+
+
 @app.post("/api/master-cabinet/game")
 async def create_game_from_master_cabinet_handler(
     payload: MasterCabinetCreateGameRequest,
@@ -418,6 +557,82 @@ async def list_master_cabinet_games_handler(
     ]
 
 
+@app.get(
+    "/api/master-cabinet/game/{game_id}",
+    response_model=MasterCabinetGameDetailsResponse,
+)
+async def get_master_cabinet_game_handler(
+    game_id: str,
+    master: database.Master = Depends(_require_master_cabinet_auth),
+) -> MasterCabinetGameDetailsResponse:
+    game = await database.Game.find_by_external_id(game_id)
+    if game is None or game.master_id != master.id:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    gmap = await database.Map.find_by_game_id(game.id)
+    characters = await database.Character.find_by_game_id(game.id)
+    items = await database.Item.find_by_game_id(game.id)
+    audio_files = await database.AudioFile.find_by_game_id(game.id)
+    video_files = await database.VideoFile.find_by_game_id(game.id)
+
+    return MasterCabinetGameDetailsResponse(
+        external_id=game.external_id,
+        name=game.name,
+        room_id=game.room_id,
+        master_join_link=game.master_join_link,
+        master_avatar_url=game.master_avatar_url,
+        map=(
+            MasterCabinetGameMap(
+                external_id=gmap.external_id,
+                url=gmap.url,
+                x_center=gmap.x_center,
+                y_center=gmap.y_center,
+                zoom=gmap.zoom,
+            )
+            if gmap
+            else None
+        ),
+        characters=[
+            MasterCabinetGameCharacter(
+                external_id=cha.external_id,
+                name=cha.name,
+                join_link=cha.join_link,
+                avatar_url=cha.avatar_url,
+                race=cha.race,
+                color=cha.color,
+            )
+            for cha in characters
+        ],
+        items=[
+            MasterCabinetGameItem(
+                external_id=item.external_id,
+                name=item.name,
+                icon_url=item.icon_url,
+                map_id=item.map_id,
+            )
+            for item in items
+        ],
+        audio_files=[
+            MasterCabinetGameAudioFile(
+                external_id=audio.external_id,
+                name=audio.name,
+                url=audio.url,
+                duration_seconds=audio.duration_seconds,
+            )
+            for audio in audio_files
+        ],
+        video_files=[
+            MasterCabinetGameVideoFile(
+                external_id=video.external_id,
+                name=video.name,
+                url=video.url,
+                duration_seconds=video.duration_seconds,
+            )
+            for video in video_files
+        ],
+    )
+
+
 @app.put(
     "/api/master-cabinet/game/{game_external_id}/master-avatar",
     response_model=MasterCabinetUpdateGameMasterAvatarResponse,
@@ -444,7 +659,7 @@ async def update_master_cabinet_game_master_avatar_handler(
 @app.post("/api/master-cabinet/upload", response_model=MasterCabinetUploadFileResponse)
 async def upload_master_cabinet_file_handler(
     file: UploadFile = File(...),
-    _: database.Master = Depends(_require_master_cabinet_auth),
+    master: database.Master = Depends(_require_master_cabinet_auth),
 ) -> MasterCabinetUploadFileResponse:
     file_bytes = await file.read()
     if not file_bytes:
@@ -452,11 +667,14 @@ async def upload_master_cabinet_file_handler(
 
     extension = os.path.splitext(file.filename or "")[1]
     key = f"uploads/{uuid.uuid4().hex}{extension}"
+    bucket_name = _master_assets_bucket_name(master)
+    s3_service.ensure_bucket_exists(bucket_name)
     file_url = s3_service.upload_bytes(
         content=file_bytes,
         key=key,
         content_type=file.content_type,
         make_public=True,
+        bucket_name=bucket_name,
     )
 
     return MasterCabinetUploadFileResponse(
