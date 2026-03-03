@@ -1116,6 +1116,9 @@ async def join_handler(link: str) -> JoinResponse:
 @app.get("/api/game/{game_external_id}/map")
 async def get_map_handler(game_external_id: str) -> database.Map:
     gmap = await database.Map.find_by_game_external_id(game_external_id)
+    if not gmap:
+        raise HTTPException(status_code=404, detail="Map is not set yet.")
+
     return gmap
 
 
